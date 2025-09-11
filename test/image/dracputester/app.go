@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/kubernetes-sigs/dra-driver-cpu/test/pkg/discovery"
@@ -46,16 +47,40 @@ func cpuSet(sysRoot string) (cpuset.CPUSet, error) {
 	return cpuset.Parse(strings.TrimSpace(string(data)))
 }
 
+func getAffinity() (cpuset.CPUSet, error) {
+	var unixCS unix.CPUSet
+	err := unix.SchedGetaffinity(os.Getpid(), &unixCS)
+	if err != nil {
+		return cpuset.New(), err
+	}
+
+	var allowedCPUs []int
+	for i := 0; i < runtime.NumCPU(); i++ {
+		if unixCS.IsSet(i) {
+			allowedCPUs = append(allowedCPUs, i)
+		}
+	}
+	return cpuset.New(allowedCPUs...), nil
+}
+
 func main() {
 	cpus, err := cpuSet("/sys")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error determining allocated cpus: %v\n", err)
 		os.Exit(1)
 	}
+	cpuAff, err := getAffinity()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error determining CPU affinity: %v\n", err)
+		os.Exit(2)
+	}
 	info := discovery.DRACPUTester{
 		Buildinfo: discovery.NewBuildinfo(),
 		Allocation: discovery.DRACPUAllocation{
 			CPUs: cpus.String(),
+		},
+		Runtimeinfo: discovery.DRACPURuntimeinfo{
+			CPUAffinity: cpuAff.String(),
 		},
 	}
 	err = json.NewEncoder(os.Stdout).Encode(info)
