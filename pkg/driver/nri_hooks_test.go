@@ -162,26 +162,6 @@ func TestCreateContainer(t *testing.T) {
 			expectedUpdateRequired: false,
 		},
 		{
-			name: "shared container triggers updates for all other shared containers when update is pending",
-			initialStore: func() *PodConfigStore {
-				s := NewPodConfigStore(mockProvider)
-				s.SetContainerState("other-pod", NewContainerCPUState(CPUTypeShared, "shared-ctr", "1234", cpuset.New(0, 1)))
-				return s
-			}(),
-			container:               newTestContainer(""),
-			sharedCPUUpdateRequired: true,
-			expectedContainerAdjustment: &api.ContainerAdjustment{
-				Linux: &api.LinuxContainerAdjustment{Resources: &api.LinuxResources{Cpu: &api.LinuxCPU{Cpus: "0-7"}}},
-			},
-			expectedContianerUpdates: []*api.ContainerUpdate{
-				{
-					ContainerId: "1234",
-					Linux:       &api.LinuxContainerUpdate{Resources: &api.LinuxResources{Cpu: &api.LinuxCPU{Cpus: "0-7"}}},
-				},
-			},
-			expectedUpdateRequired: false, // Flag should be reset
-		},
-		{
 			name:         "guaranteed container with malformed env falls back to shared",
 			initialStore: NewPodConfigStore(mockProvider),
 			container:    newTestContainer("invalid"),
@@ -196,91 +176,12 @@ func TestCreateContainer(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			driver := &CPUDriver{podConfigStore: tc.initialStore, cpuInfoProvider: mockProvider}
-			setSharedCPUUpdateRequired(tc.sharedCPUUpdateRequired)
 
 			adjust, updates, err := driver.CreateContainer(context.Background(), pod, tc.container)
 			require.NoError(t, err)
 
 			require.Equal(t, tc.expectedContainerAdjustment, adjust)
 			require.ElementsMatch(t, tc.expectedContianerUpdates, updates)
-			require.Equal(t, tc.expectedUpdateRequired, isSharedCPUUpdateRequired())
-		})
-	}
-}
-
-func TestRemoveContainer(t *testing.T) {
-	allCPUs := cpuset.New(0, 1, 2, 3, 4, 5, 6, 7)
-	pod1 := &api.PodSandbox{Id: "pod-id-1", Name: "my-pod", Namespace: "my-ns", Uid: "pod-uid-1"}
-	ctr1 := &api.Container{Id: "ctr-id-1", PodSandboxId: pod1.Id, Name: "my-ctr"}
-
-	var infos []cpuinfo.CPUInfo
-	for _, cpuID := range allCPUs.UnsortedList() {
-		infos = append(infos, cpuinfo.CPUInfo{CpuID: cpuID, CoreID: cpuID, SocketID: 0, NumaNode: 0})
-	}
-	mockProvider := &mockCPUInfoProvider{cpuInfos: infos}
-
-	testCases := []struct {
-		name                   string
-		initialStore           *PodConfigStore
-		removePod              bool
-		expectedUpdateRequired bool
-	}{
-		{
-			name: "Remove guaranteed container sets update required for shared containers",
-			initialStore: func() *PodConfigStore {
-				s := NewPodConfigStore(mockProvider)
-				s.SetContainerState(types.UID(pod1.Uid), NewContainerCPUState(CPUTypeGuaranteed, ctr1.Name, types.UID(ctr1.Id), cpuset.New(0, 1)))
-				return s
-			}(),
-			removePod:              false,
-			expectedUpdateRequired: true,
-		},
-		{
-			name: "Remove non-guaranteed container does not set update required",
-			initialStore: func() *PodConfigStore {
-				s := NewPodConfigStore(mockProvider)
-				s.SetContainerState(types.UID(pod1.Uid), NewContainerCPUState(CPUTypeShared, ctr1.Name, types.UID(ctr1.Id), cpuset.New(0, 1, 2, 3)))
-				return s
-			}(),
-			removePod:              false,
-			expectedUpdateRequired: false,
-		},
-		{
-			name: "Remove guaranteed pod sets update required for shared containers",
-			initialStore: func() *PodConfigStore {
-				s := NewPodConfigStore(mockProvider)
-				s.SetContainerState(types.UID(pod1.Uid), NewContainerCPUState(CPUTypeGuaranteed, ctr1.Name, types.UID(ctr1.Id), cpuset.New(0, 1)))
-				return s
-			}(),
-			removePod:              true,
-			expectedUpdateRequired: true,
-		},
-		{
-			name: "Remove non-guaranteed pod does not set update required",
-			initialStore: func() *PodConfigStore {
-				s := NewPodConfigStore(mockProvider)
-				s.SetContainerState(types.UID(pod1.Uid), NewContainerCPUState(CPUTypeGuaranteed, ctr1.Name, types.UID(ctr1.Id), cpuset.New(0, 1, 2, 3)))
-				return s
-			}(),
-			removePod:              true,
-			expectedUpdateRequired: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			driver := &CPUDriver{podConfigStore: tc.initialStore, cpuInfoProvider: mockProvider}
-			setSharedCPUUpdateRequired(false) // Reset before each test
-
-			var err error
-			if tc.removePod {
-				err = driver.RemovePodSandbox(context.Background(), pod1)
-			} else {
-				err = driver.RemoveContainer(context.Background(), pod1, ctr1)
-			}
-			require.NoError(t, err)
-
-			require.Equal(t, tc.expectedUpdateRequired, isSharedCPUUpdateRequired())
 		})
 	}
 }

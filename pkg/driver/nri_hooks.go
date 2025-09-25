@@ -20,17 +20,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/containerd/nri/pkg/api"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
-)
-
-var (
-	sharedCPUUpdateMutex    sync.Mutex
-	sharedCPUUpdateRequired bool
 )
 
 // Synchronize is called by the NRI to synchronize the state of the driver during bootstrap.
@@ -98,7 +92,7 @@ func (cp *CPUDriver) getSharedContainerUpdates(currentContainerID types.UID) []*
 	klog.Infof("Updating CPU allocation to: %v for containers without guaranteed CPUs", publicCPUs.String())
 	for _, containerUID := range sharedCPUContainers {
 		if containerUID == currentContainerID {
-			// Skip the current container as it is already coveed in container adjustment.
+			// Skip the current container as it is already covered in container adjustment.
 			continue
 		}
 		containerUpdate := &api.ContainerUpdate{
@@ -134,64 +128,29 @@ func (cp *CPUDriver) CreateContainer(_ context.Context, pod *api.PodSandbox, ctr
 		klog.Infof("Guaranteed CPUs found for pod:%s container:%s with cpus:%v", pod.Name, ctr.Name, guaranteedCPUs.String())
 		adjust.SetLinuxCPUSetCPUs(guaranteedCPUs.String())
 		cp.podConfigStore.SetContainerState(types.UID(pod.GetUid()), state)
-
 		// Remove the guaranteed CPUs from the containers with shared CPUs.
 		updates = cp.getSharedContainerUpdates(containerId)
-		setSharedCPUUpdateRequired(false)
-	}
-
-	if isSharedCPUUpdateRequired() {
-		updates = cp.getSharedContainerUpdates(containerId)
-		setSharedCPUUpdateRequired(false)
 	}
 
 	return adjust, updates, nil
 }
 
-func setSharedCPUUpdateRequired(required bool) {
-	sharedCPUUpdateMutex.Lock()
-	defer sharedCPUUpdateMutex.Unlock()
-	sharedCPUUpdateRequired = required
-}
-
-func isSharedCPUUpdateRequired() bool {
-	sharedCPUUpdateMutex.Lock()
-	defer sharedCPUUpdateMutex.Unlock()
-	return sharedCPUUpdateRequired
+func (cp *CPUDriver) StopContainer(_ context.Context, pod *api.PodSandbox, ctr *api.Container) ([]*api.ContainerUpdate, error) {
+	klog.Infof("RemoveContainer Pod:%s/%s PodUID:%s Container:%s ContainerID:%s", pod.Namespace, pod.Name, pod.Uid, ctr.Name, ctr.Id)
+	updates := []*api.ContainerUpdate{}
+	mutated := cp.podConfigStore.RemoveContainerState(types.UID(pod.GetUid()), ctr.GetName())
+	if mutated {
+		containerId := types.UID(ctr.GetId())
+		// Remove the guaranteed CPUs from the containers with shared CPUs.
+		updates = cp.getSharedContainerUpdates(containerId)
+	}
+	return updates, nil
 }
 
 // RemoveContainer handles container removal requests from the NRI.
 func (cp *CPUDriver) RemoveContainer(_ context.Context, pod *api.PodSandbox, ctr *api.Container) error {
 	klog.Infof("RemoveContainer Pod:%s/%s PodUID:%s Container:%s ContainerID:%s", pod.Namespace, pod.Name, pod.Uid, ctr.Name, ctr.Id)
-	// TODO(pravk03): If a container with guaranteed CPUs is removed, we need to update the CPU assignment of other containers with shared CPUs.
-	// There isn't a way to do that in this call. It would only be updated the next time CreateContainer() gets called.
-	if cp.podConfigStore.IsContainerGuaranteed(types.UID(pod.Uid), ctr.Name) {
-		setSharedCPUUpdateRequired(true)
-	}
+	// TODO: remove, serves only for debug purposes atm
 	cp.podConfigStore.RemoveContainerState(types.UID(pod.GetUid()), ctr.GetName())
-	return nil
-}
-
-// RunPodSandbox handles pod sandbox creation requests from the NRI.
-func (cp *CPUDriver) RunPodSandbox(_ context.Context, pod *api.PodSandbox) error {
-	klog.Infof("RunPodSandbox Pod %s/%s UID %s", pod.Namespace, pod.Name, pod.Uid)
-	return nil
-}
-
-// StopPodSandbox handles pod sandbox stop requests from the NRI.
-func (cp *CPUDriver) StopPodSandbox(_ context.Context, pod *api.PodSandbox) error {
-	klog.Infof("StopPodSandbox Pod %s/%s UID %s", pod.Namespace, pod.Name, pod.Uid)
-	return nil
-}
-
-// RemovePodSandbox handles pod sandbox removal requests from the NRI.
-func (cp *CPUDriver) RemovePodSandbox(_ context.Context, pod *api.PodSandbox) error {
-	klog.Infof("RemovePodSandbox Pod %s/%s UID %s", pod.Namespace, pod.Name, pod.Uid)
-	// TODO(pravk03): If a pod with guaranteed CPUs is removed, we need to update the CPU assignment of other containers with shared CPUs.
-	// There isn't a way to do that in this call. It would only be updated the next time CreateContainer() gets called.
-	if cp.podConfigStore.IsPodGuaranteed(types.UID(pod.Uid)) {
-		setSharedCPUUpdateRequired(true)
-	}
-	cp.podConfigStore.DeletePodState(types.UID(pod.Uid))
 	return nil
 }
