@@ -25,7 +25,9 @@ import (
 
 	"github.com/containerd/nri/pkg/stub"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
+	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/store"
+	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
@@ -72,24 +74,25 @@ type CPUInfoProvider interface {
 	GetCPUTopology() (*cpuinfo.CPUTopology, error)
 }
 
+type deviceManager interface {
+	CreateSlices(klog.Logger) [][]resourceapi.Device
+	AllocateCPUs(klog.Logger, *resourceapi.ResourceClaim) (cpuset.CPUSet, error)
+}
+
 // CPUDriver is the structure that holds all the driver runtime information.
 type CPUDriver struct {
-	driverName             string
-	nodeName               string
-	kubeClient             kubernetes.Interface
-	draPlugin              KubeletPlugin
-	nriPlugin              stub.Stub
-	podConfigStore         *store.PodConfig
-	cpuAllocationStore     *store.CPUAllocation
-	cdiMgr                 cdiManager
-	cpuTopology            *cpuinfo.CPUTopology
-	deviceNameToCPUID      map[string]int
-	deviceNameToSocketID   map[string]int
-	deviceNameToNUMANodeID map[string]int
-	reservedCPUs           cpuset.CPUSet
-	cpuDeviceMode          string
-	cpuDeviceGroupBy       string
-	claimTracker           *store.ClaimTracker
+	driverName         string
+	nodeName           string
+	kubeClient         kubernetes.Interface
+	draPlugin          KubeletPlugin
+	nriPlugin          stub.Stub
+	podConfigStore     *store.PodConfig
+	cpuAllocationStore *store.CPUAllocation
+	cdiMgr             cdiManager
+	cpuTopology        *cpuinfo.CPUTopology
+	reservedCPUs       cpuset.CPUSet
+	claimTracker       *store.ClaimTracker
+	devMgr             deviceManager
 }
 
 // Config is the configuration for the CPUDriver.
@@ -104,16 +107,11 @@ type Config struct {
 // Start creates and starts a new CPUDriver.
 func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) (*CPUDriver, error) {
 	plugin := &CPUDriver{
-		driverName:             config.DriverName,
-		nodeName:               config.NodeName,
-		kubeClient:             clientset,
-		deviceNameToCPUID:      make(map[string]int),
-		deviceNameToSocketID:   make(map[string]int),
-		deviceNameToNUMANodeID: make(map[string]int),
-		reservedCPUs:           config.ReservedCPUs,
-		cpuDeviceMode:          config.CpuDeviceMode,
-		cpuDeviceGroupBy:       config.CPUDeviceGroupBy,
-		claimTracker:           store.NewClaimTracker(),
+		driverName:   config.DriverName,
+		nodeName:     config.NodeName,
+		kubeClient:   clientset,
+		reservedCPUs: config.ReservedCPUs,
+		claimTracker: store.NewClaimTracker(),
 	}
 	cpuInfoProvider := cpuinfo.NewSystemCPUInfo()
 	topo, err := cpuInfoProvider.GetCPUTopology()
@@ -126,6 +124,16 @@ func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) 
 	plugin.cpuTopology = topo
 	plugin.cpuAllocationStore = store.NewCPUAllocation(plugin.cpuTopology, config.ReservedCPUs)
 	plugin.podConfigStore = store.NewPodConfig()
+
+	if config.CpuDeviceMode == CPU_DEVICE_MODE_INDIVIDUAL {
+		plugin.devMgr = device.NewIndividualCoreManager(config.DriverName, topo, config.ReservedCPUs)
+	} else {
+		if config.CPUDeviceGroupBy == GROUP_BY_SOCKET {
+			plugin.devMgr = device.NewSocketGroupedManager(config.DriverName, topo, config.ReservedCPUs, plugin.cpuAllocationStore.GetSharedCPUs)
+		} else {
+			plugin.devMgr = device.NewNUMAGroupedManager(config.DriverName, topo, config.ReservedCPUs, plugin.cpuAllocationStore.GetSharedCPUs)
+		}
+	}
 
 	driverPluginPath := filepath.Join(kubeletPluginPath, config.DriverName)
 	if err := os.MkdirAll(driverPluginPath, 0750); err != nil {
