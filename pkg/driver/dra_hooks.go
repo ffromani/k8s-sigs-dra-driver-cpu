@@ -27,6 +27,7 @@ import (
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/dynamic-resource-allocation/deviceattribute"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
 	"k8s.io/klog/v2"
@@ -121,6 +122,8 @@ func (cp *CPUDriver) createGroupedCPUDeviceSlices() [][]resourceapi.Device {
 					"dra.cpu/smtEnabled": {BoolValue: &smtEnabled},
 					// TODO(pravk03): Remove. Hack to align with NIC (DRANet). We need some standard attribute to align other resources with CPU.
 					"dra.net/numaNode": {IntValue: &numaID},
+					// dra-driver-sriov (https://github.com/k8snetworkplumbingwg/dra-driver-sriov) compatibility
+					deviceattribute.StandardDeviceAttributePrefix + "numaNode": {IntValue: &numaID},
 				},
 				Capacity:                 deviceCapacity,
 				AllowMultipleAllocations: ptr.To(true),
@@ -206,6 +209,8 @@ func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
 					"dra.cpu/cpuID":      {IntValue: &cpuID},
 					// TODO(pravk03): Remove. Hack to align with NIC (DRANet). We need some standard attribute to align other resources with CPU.
 					"dra.net/numaNode": {IntValue: &numaNode},
+					// dra-driver-sriov (https://github.com/k8snetworkplumbingwg/dra-driver-sriov) compatibility
+					deviceattribute.StandardDeviceAttributePrefix + "numaNode": {IntValue: &numaNode},
 				},
 				Capacity: make(map[resourceapi.QualifiedName]resourceapi.DeviceCapacity),
 			}
