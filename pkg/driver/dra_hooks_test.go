@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/testr"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/store"
 	"github.com/stretchr/testify/require"
@@ -67,7 +69,7 @@ func newMockCdiMgr() *mockCdiMgr {
 	}
 }
 
-func (m *mockCdiMgr) AddDevice(deviceName, envVar string) error {
+func (m *mockCdiMgr) AddDevice(_ logr.Logger, deviceName, envVar string) error {
 	if m.addError != nil {
 		return m.addError
 	}
@@ -75,7 +77,7 @@ func (m *mockCdiMgr) AddDevice(deviceName, envVar string) error {
 	return nil
 }
 
-func (m *mockCdiMgr) RemoveDevice(deviceName string) error {
+func (m *mockCdiMgr) RemoveDevice(_ logr.Logger, deviceName string) error {
 	if m.removeError != nil {
 		return m.removeError
 	}
@@ -302,7 +304,8 @@ func TestPublishResources(t *testing.T) {
 				reservedCPUs:      tc.reservedCPUs,
 			}
 
-			cp.PublishResources(context.Background())
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			cp.PublishResources(ctx)
 
 			if !tc.expectPublish {
 				require.Nil(t, mockPlugin.publishedResources)
@@ -575,7 +578,8 @@ func TestPrepareResourceClaims(t *testing.T) {
 			mockCdiMgr.addError = tc.mockCdiAddError
 			tc.driver.cdiMgr = mockCdiMgr
 
-			preparedClaims, err := tc.driver.PrepareResourceClaims(context.Background(), tc.claims)
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			preparedClaims, err := tc.driver.PrepareResourceClaims(ctx, tc.claims)
 			require.NoError(t, err)
 			require.Len(t, preparedClaims, tc.expectedResultsCount)
 
@@ -613,7 +617,7 @@ func TestPrepareResourceClaimsGroupedMode(t *testing.T) {
 		driver.cpuTopology, _ = mockProvider.GetCPUTopology()
 		driver.cpuAllocationStore = store.NewCPUAllocation(driver.cpuTopology, reservedCPUs)
 		for claimUID, cpus := range initialAllocations {
-			driver.cpuAllocationStore.AddResourceClaimAllocation(claimUID, cpus)
+			driver.cpuAllocationStore.AddResourceClaimAllocation(testr.New(t), claimUID, cpus)
 		}
 
 		topo, err := mockProvider.GetCPUTopology()
@@ -850,7 +854,8 @@ func TestPrepareResourceClaimsGroupedMode(t *testing.T) {
 			mockCdiMgr.addError = tc.mockCdiAddError
 			driver.cdiMgr = mockCdiMgr
 
-			preparedClaims, err := driver.PrepareResourceClaims(context.Background(), tc.claims)
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			preparedClaims, err := driver.PrepareResourceClaims(ctx, tc.claims)
 			require.NoError(t, err)
 
 			if len(tc.claims) > 0 {
@@ -966,10 +971,11 @@ func TestPrepareResourceClaimsRepeatedCalls(t *testing.T) {
 				}
 			}
 
-			_, err := driver.PrepareResourceClaims(context.Background(), makeClaim(tc.firstDevices))
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			_, err := driver.PrepareResourceClaims(ctx, makeClaim(tc.firstDevices))
 			require.NoError(t, err)
 
-			_, err = driver.PrepareResourceClaims(context.Background(), makeClaim(tc.secondDevices))
+			_, err = driver.PrepareResourceClaims(ctx, makeClaim(tc.secondDevices))
 			require.NoError(t, err)
 
 			gotCPUs, ok := driver.cpuAllocationStore.GetResourceClaimAllocation(claimUID)
@@ -1027,7 +1033,8 @@ func TestUnprepareResourceClaims(t *testing.T) {
 				cpuAllocationStore: store.NewCPUAllocation(topo, cpuset.New()),
 			}
 
-			unpreparedClaims, err := cp.UnprepareResourceClaims(context.Background(), tc.claims)
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			unpreparedClaims, err := cp.UnprepareResourceClaims(ctx, tc.claims)
 			require.NoError(t, err)
 			require.Len(t, unpreparedClaims, tc.expectedResults)
 

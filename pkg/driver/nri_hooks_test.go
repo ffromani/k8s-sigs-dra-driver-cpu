@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/containerd/nri/pkg/api"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/testr"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/store"
 	"github.com/stretchr/testify/require"
@@ -79,7 +81,7 @@ func TestParseDRAEnvToClaimAllocations(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			allocations, err := parseDRAEnvToClaimAllocations(tc.envs)
+			allocations, err := parseDRAEnvToClaimAllocations(testr.New(t), tc.envs)
 			if tc.expectedErrorContains != "" {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tc.expectedErrorContains)
@@ -163,7 +165,7 @@ func TestCreateContainer(t *testing.T) {
 			}(),
 			cpuAllocationStore: func() *store.CPUAllocation {
 				store := store.NewCPUAllocation(topo, cpuset.New())
-				store.AddResourceClaimAllocation(types.UID(claimUID), cpuset.New(2, 3))
+				store.AddResourceClaimAllocation(testr.New(t), types.UID(claimUID), cpuset.New(2, 3))
 				return store
 			}(),
 			claimTracker: store.NewClaimTracker(),
@@ -207,7 +209,8 @@ func TestCreateContainer(t *testing.T) {
 				cpuAllocationStore: tc.cpuAllocationStore,
 				claimTracker:       tc.claimTracker,
 			}
-			adjust, updates, err := driver.CreateContainer(context.Background(), pod, tc.container)
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			adjust, updates, err := driver.CreateContainer(ctx, pod, tc.container)
 			require.NoError(t, err)
 
 			require.Equal(t, tc.expectedContainerAdjustment, adjust)
@@ -270,7 +273,8 @@ func TestStopContainer(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			sort.Strings(tc.expectedUpdatesFor)
-			upd, err := tc.driver.StopContainer(context.Background(), pod1, ctr1)
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			upd, err := tc.driver.StopContainer(ctx, pod1, ctr1)
 			require.NoError(t, err)
 			require.Equal(t, containerIDsFromUpdates(upd), tc.expectedUpdatesFor)
 		})
@@ -330,7 +334,8 @@ func TestNRISynchronize(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.driver.Synchronize(context.Background(), tc.runtimePods, tc.runtimeCtrs)
+			ctx := logr.NewContext(context.Background(), testr.New(t))
+			_, err := tc.driver.Synchronize(ctx, tc.runtimePods, tc.runtimeCtrs)
 
 			if tc.expectedError {
 				require.Error(t, err)

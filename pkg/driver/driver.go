@@ -24,13 +24,14 @@ import (
 	"time"
 
 	"github.com/containerd/nri/pkg/stub"
+	"github.com/go-logr/logr"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
+	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/logger"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/store"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 )
 
@@ -61,8 +62,8 @@ type KubeletPlugin interface {
 }
 
 type cdiManager interface {
-	AddDevice(deviceName string, envVar string) error
-	RemoveDevice(deviceName string) error
+	AddDevice(logger logr.Logger, deviceName string, envVar string) error
+	RemoveDevice(logger logr.Logger, deviceName string) error
 }
 
 // CPUInfoProvider is an interface for getting CPU information.
@@ -103,6 +104,7 @@ type Config struct {
 
 // Start creates and starts a new CPUDriver.
 func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) (*CPUDriver, error) {
+	logger := logger.FromContext(ctx)
 	plugin := &CPUDriver{
 		driverName:             config.DriverName,
 		nodeName:               config.NodeName,
@@ -153,7 +155,7 @@ func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) 
 		return nil, err
 	}
 
-	cdiMgr, err := NewCdiManager(config.DriverName)
+	cdiMgr, err := NewCdiManager(logger, config.DriverName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CDI manager: %w", err)
 	}
@@ -166,7 +168,7 @@ func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) 
 		// https://github.com/containerd/nri/pull/173
 		// Otherwise it silently exits the program
 		stub.WithOnClose(func() {
-			klog.Infof("%s NRI plugin closed", config.DriverName)
+			logger.Info("NRI plugin closed")
 		}),
 	}
 	stub, err := stub.New(plugin, nriOpts...)
@@ -177,7 +179,8 @@ func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) 
 
 	go func() {
 		if err := runNRIPluginWithRetry(ctx, plugin.nriPlugin, maxAttempts); err != nil && ctx.Err() == nil {
-			klog.Fatalf("NRI plugin failed for %d times to be restarted", maxAttempts)
+			logger.Error(err, "NRI plugin failed to be restarted", "maxAttempts", maxAttempts)
+			os.Exit(1)
 		}
 	}()
 
@@ -194,8 +197,9 @@ func (cp *CPUDriver) Stop() {
 }
 
 // Shutdown is called when the runtime is shutting down.
-func (cp *CPUDriver) Shutdown(_ context.Context) {
-	klog.Info("Runtime shutting down...")
+func (cp *CPUDriver) Shutdown(ctx context.Context) {
+	logger := logger.FromContext(ctx)
+	logger.Info("runtime shutting down")
 }
 
 type nriRunner interface {
@@ -203,14 +207,15 @@ type nriRunner interface {
 }
 
 func runNRIPluginWithRetry(ctx context.Context, plugin nriRunner, maxAttempts int) error {
+	logger := logger.FromContext(ctx)
 	for i := 0; i < maxAttempts; i++ {
 		err := plugin.Run(ctx)
 		if ctx.Err() != nil {
-			klog.Infof("NRI plugin stopped: context cancelled")
+			logger.Info("NRI plugin stopped: context cancelled")
 			return ctx.Err()
 		}
 		if err != nil {
-			klog.Infof("NRI plugin failed with error %v, restarting %d out of %d", err, i+1, maxAttempts)
+			logger.Info("NRI plugin failed, restarting", "error", err, "attempt", i+1, "maxAttempts", maxAttempts)
 		}
 	}
 	return fmt.Errorf("NRI plugin failed for %d times to be restarted", maxAttempts)

@@ -22,7 +22,9 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/go-logr/logr"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
+	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/logger"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpumanager"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 	resourceapi "k8s.io/api/resource/v1"
@@ -30,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 	"k8s.io/utils/ptr"
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
@@ -52,8 +53,8 @@ const (
 )
 
 // createGroupedCPUDeviceSlices creates Device objects based on the CPU topology, grouped by a specific criteria.
-func (cp *CPUDriver) createGroupedCPUDeviceSlices() [][]resourceapi.Device {
-	klog.Info("Creating grouped CPU devices", "groupBy", cp.cpuDeviceGroupBy)
+func (cp *CPUDriver) createGroupedCPUDeviceSlices(logger logr.Logger) [][]resourceapi.Device {
+	logger.Info("creating grouped CPU devices", "groupBy", cp.cpuDeviceGroupBy)
 	var devices []resourceapi.Device
 
 	topo := cp.cpuTopology
@@ -220,17 +221,18 @@ func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
 
 // PublishResources publishes ResourceSlice for CPU resources.
 func (cp *CPUDriver) PublishResources(ctx context.Context) {
-	klog.Infof("Publishing resources")
+	logger := logger.FromContext(ctx)
+	logger.Info("publishing resources")
 
 	var deviceChunks [][]resourceapi.Device
 	if cp.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
-		deviceChunks = cp.createGroupedCPUDeviceSlices()
+		deviceChunks = cp.createGroupedCPUDeviceSlices(logger)
 	} else {
 		deviceChunks = cp.createCPUDeviceSlices()
 	}
 
 	if deviceChunks == nil {
-		klog.Infof("No devices to publish or error occurred.")
+		logger.Info("no devices to publish or error occurred")
 		return
 	}
 
@@ -248,13 +250,14 @@ func (cp *CPUDriver) PublishResources(ctx context.Context) {
 
 	err := cp.draPlugin.PublishResources(ctx, resources)
 	if err != nil {
-		klog.Errorf("error publishing resources: %v", err)
+		logger.Error(err, "error publishing resources")
 	}
 }
 
 // PrepareResourceClaims is called by the kubelet to prepare a resource claim.
 func (cp *CPUDriver) PrepareResourceClaims(ctx context.Context, claims []*resourceapi.ResourceClaim) (map[types.UID]kubeletplugin.PrepareResult, error) {
-	klog.Infof("PrepareResourceClaims is called: number of claims: %d", len(claims))
+	logger := logger.FromContext(ctx)
+	logger.Info("PrepareResourceClaims called", "claimCount", len(claims))
 
 	result := make(map[types.UID]kubeletplugin.PrepareResult)
 
@@ -264,10 +267,10 @@ func (cp *CPUDriver) PrepareResourceClaims(ctx context.Context, claims []*resour
 
 	for _, claim := range claims {
 		if cp.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
-			klog.Infof("Claim %s/%s is for a grouped resource", claim.Namespace, claim.Name)
+			logger.Info("claim is for a grouped resource", "claimNamespace", claim.Namespace, "claimName", claim.Name)
 			result[claim.UID] = cp.prepareGroupedResourceClaim(ctx, claim)
 		} else {
-			klog.Infof("Claim %s/%s is for an individual resource", claim.Namespace, claim.Name)
+			logger.Info("claim is for an individual resource", "claimNamespace", claim.Namespace, "claimName", claim.Name)
 			result[claim.UID] = cp.prepareResourceClaim(ctx, claim)
 		}
 	}
@@ -279,7 +282,8 @@ func getCDIDeviceName(uid types.UID) string {
 }
 
 func (cp *CPUDriver) prepareGroupedResourceClaim(ctx context.Context, claim *resourceapi.ResourceClaim) kubeletplugin.PrepareResult {
-	klog.Infof("prepareResourceClaim claim:%s/%s", claim.Namespace, claim.Name)
+	logger := logger.FromContext(ctx)
+	logger.Info("prepareResourceClaim", "claimNamespace", claim.Namespace, "claimName", claim.Name)
 
 	if claim.Status.Allocation == nil {
 		return kubeletplugin.PrepareResult{
@@ -297,7 +301,7 @@ func (cp *CPUDriver) prepareGroupedResourceClaim(ctx context.Context, claim *res
 		if quantity, ok := alloc.ConsumedCapacity[cpuResourceQualifiedName]; ok {
 			count := quantity.Value()
 			claimCPUCount = count
-			klog.Infof("Found request for %d CPUs in device %s for claim %s", count, alloc.Device, claim.Name)
+			logger.Info("found request for CPUs", "count", count, "device", alloc.Device, "claimName", claim.Name)
 		}
 
 		topo := cp.cpuTopology
@@ -310,7 +314,7 @@ func (cp *CPUDriver) prepareGroupedResourceClaim(ctx context.Context, claim *res
 			}
 			socketCPUs := topo.CPUDetails.CPUsInSockets(socketID)
 			availableCPUsForDevice = sharedCPUs.Difference(cpuAssignment).Intersection(socketCPUs)
-			klog.Infof("Socket %d CPUs:%s available CPUs: %s", socketID, socketCPUs.String(), availableCPUsForDevice.String())
+			logger.Info("socket CPUs", "socketID", socketID, "socketCPUs", socketCPUs.String(), "availableCPUs", availableCPUsForDevice.String())
 		} else { // numanode
 			numaNodeID, ok := cp.deviceNameToNUMANodeID[alloc.Device]
 			if !ok {
@@ -318,33 +322,32 @@ func (cp *CPUDriver) prepareGroupedResourceClaim(ctx context.Context, claim *res
 			}
 			numaCPUs := topo.CPUDetails.CPUsInNUMANodes(numaNodeID)
 			availableCPUsForDevice = sharedCPUs.Difference(cpuAssignment).Intersection(numaCPUs)
-			klog.Infof("NUMA node %d CPUs:%s available CPUs: %s", numaNodeID, numaCPUs.String(), availableCPUsForDevice.String())
+			logger.Info("NUMA node CPUs", "numaNodeID", numaNodeID, "numaCPUs", numaCPUs.String(), "availableCPUs", availableCPUsForDevice.String())
 		}
 
-		logger := klog.FromContext(ctx)
 		cur, err := cpumanager.TakeByTopologyNUMAPacked(logger, topo, availableCPUsForDevice, int(claimCPUCount), cpumanager.CPUSortingStrategyPacked, true)
 		if err != nil {
 			return kubeletplugin.PrepareResult{Err: err}
 		}
 		cpuAssignment = cpuAssignment.Union(cur)
-		klog.Infof("CPU assignment for device %s: %s. All cpus assigned:%s", alloc.Device, cur.String(), cpuAssignment.String())
+		logger.Info("CPU assignment", "device", alloc.Device, "assigned", cur.String(), "allAssigned", cpuAssignment.String())
 	}
 
 	if cpuAssignment.Size() == 0 {
-		klog.V(5).Infof("prepareResourceClaim claim:%s/%s has no CPU allocations for this driver", claim.Namespace, claim.Name)
+		logger.V(5).Info("prepareResourceClaim has no CPU allocations for this driver", "claimNamespace", claim.Namespace, "claimName", claim.Name)
 		return kubeletplugin.PrepareResult{}
 	}
 
-	cp.cpuAllocationStore.AddResourceClaimAllocation(claim.UID, cpuAssignment)
+	cp.cpuAllocationStore.AddResourceClaimAllocation(logger, claim.UID, cpuAssignment)
 
 	deviceName := getCDIDeviceName(claim.UID)
 	envVar := fmt.Sprintf("%s_%s=%s", cdiEnvVarPrefix, claim.UID, cpuAssignment.String())
-	if err := cp.cdiMgr.AddDevice(deviceName, envVar); err != nil {
+	if err := cp.cdiMgr.AddDevice(logger, deviceName, envVar); err != nil {
 		return kubeletplugin.PrepareResult{Err: err}
 	}
 
 	qualifiedName := cdiparser.QualifiedName(cdiVendor, cdiClass, deviceName)
-	klog.Infof("prepareResourceClaim CDIDeviceName:%s envVar:%s qualifiedName:%v", deviceName, envVar, qualifiedName)
+	logger.Info("prepareResourceClaim CDI device", "CDIDeviceName", deviceName, "envVar", envVar, "qualifiedName", qualifiedName)
 	preparedDevices := []kubeletplugin.Device{}
 	for _, allocResult := range claim.Status.Allocation.Devices.Results {
 		if allocResult.Driver != cp.driverName {
@@ -359,14 +362,15 @@ func (cp *CPUDriver) prepareGroupedResourceClaim(ctx context.Context, claim *res
 		preparedDevices = append(preparedDevices, preparedDevice)
 	}
 
-	klog.Infof("prepareResourceClaim preparedDevices:%+v", preparedDevices)
+	logger.Info("prepareResourceClaim prepared devices", "preparedDevices", preparedDevices)
 	return kubeletplugin.PrepareResult{
 		Devices: preparedDevices,
 	}
 }
 
-func (cp *CPUDriver) prepareResourceClaim(_ context.Context, claim *resourceapi.ResourceClaim) kubeletplugin.PrepareResult {
-	klog.Infof("prepareResourceClaim claim:%s/%s", claim.Namespace, claim.Name)
+func (cp *CPUDriver) prepareResourceClaim(ctx context.Context, claim *resourceapi.ResourceClaim) kubeletplugin.PrepareResult {
+	logger := logger.FromContext(ctx)
+	logger.Info("prepareResourceClaim", "claimNamespace", claim.Namespace, "claimName", claim.Name)
 
 	if claim.Status.Allocation == nil {
 		return kubeletplugin.PrepareResult{
@@ -389,20 +393,20 @@ func (cp *CPUDriver) prepareResourceClaim(_ context.Context, claim *resourceapi.
 	}
 
 	if len(claimCPUIDs) == 0 {
-		klog.V(5).Infof("prepareResourceClaim claim:%s/%s has no CPU allocations for this driver", claim.Namespace, claim.Name)
+		logger.V(5).Info("prepareResourceClaim has no CPU allocations for this driver", "claimNamespace", claim.Namespace, "claimName", claim.Name)
 		return kubeletplugin.PrepareResult{}
 	}
 
 	claimCPUSet := cpuset.New(claimCPUIDs...)
-	cp.cpuAllocationStore.AddResourceClaimAllocation(claim.UID, claimCPUSet)
+	cp.cpuAllocationStore.AddResourceClaimAllocation(logger, claim.UID, claimCPUSet)
 	deviceName := getCDIDeviceName(claim.UID)
 	envVar := fmt.Sprintf("%s_%s=%s", cdiEnvVarPrefix, claim.UID, claimCPUSet.String())
-	if err := cp.cdiMgr.AddDevice(deviceName, envVar); err != nil {
+	if err := cp.cdiMgr.AddDevice(logger, deviceName, envVar); err != nil {
 		return kubeletplugin.PrepareResult{Err: err}
 	}
 
 	qualifiedName := cdiparser.QualifiedName(cdiVendor, cdiClass, deviceName)
-	klog.Infof("prepareResourceClaim CDIDeviceName:%s envVar:%s qualifiedName:%v", deviceName, envVar, qualifiedName)
+	logger.Info("prepareResourceClaim CDI device", "CDIDeviceName", deviceName, "envVar", envVar, "qualifiedName", qualifiedName)
 	preparedDevices := []kubeletplugin.Device{}
 	for _, allocResult := range claim.Status.Allocation.Devices.Results {
 		if allocResult.Driver != cp.driverName {
@@ -423,7 +427,8 @@ func (cp *CPUDriver) prepareResourceClaim(_ context.Context, claim *resourceapi.
 
 // UnprepareResourceClaims is called by the kubelet to unprepare the resources for a claim.
 func (cp *CPUDriver) UnprepareResourceClaims(ctx context.Context, claims []kubeletplugin.NamespacedObject) (map[types.UID]error, error) {
-	klog.Infof("UnprepareResourceClaims is called: number of claims: %d", len(claims))
+	logger := logger.FromContext(ctx)
+	logger.Info("UnprepareResourceClaims called", "claimCount", len(claims))
 
 	result := make(map[types.UID]error)
 
@@ -432,23 +437,24 @@ func (cp *CPUDriver) UnprepareResourceClaims(ctx context.Context, claims []kubel
 	}
 
 	for _, claim := range claims {
-		klog.Infof("UnprepareResourceClaims claim:%+v", claim)
+		logger.Info("UnprepareResourceClaims claim", "claim", claim)
 		err := cp.unprepareResourceClaim(ctx, claim)
 		result[claim.UID] = err
 		if err != nil {
-			klog.Infof("error unpreparing resources for claim %s/%s : %v", claim.Namespace, claim.Name, err)
+			logger.Info("error unpreparing resources for claim", "claimNamespace", claim.Namespace, "claimName", claim.Name, "error", err)
 		}
 	}
 	return result, nil
 }
 
-func (cp *CPUDriver) unprepareResourceClaim(_ context.Context, claim kubeletplugin.NamespacedObject) error {
-	cp.cpuAllocationStore.RemoveResourceClaimAllocation(claim.UID)
+func (cp *CPUDriver) unprepareResourceClaim(ctx context.Context, claim kubeletplugin.NamespacedObject) error {
+	logger := logger.FromContext(ctx)
+	cp.cpuAllocationStore.RemoveResourceClaimAllocation(logger, claim.UID)
 	// Remove the device from the CDI spec file using the manager.
-	return cp.cdiMgr.RemoveDevice(getCDIDeviceName(claim.UID))
+	return cp.cdiMgr.RemoveDevice(logger, getCDIDeviceName(claim.UID))
 }
 
-func (cp *CPUDriver) HandleError(_ context.Context, err error, msg string) {
-	// TODO: Implement this function
-	klog.Error("HandleError error:", err, "msg:", msg)
+func (cp *CPUDriver) HandleError(ctx context.Context, err error, msg string) {
+	logger := logger.FromContext(ctx)
+	logger.Error(err, msg)
 }
