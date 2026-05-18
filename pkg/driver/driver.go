@@ -72,8 +72,8 @@ type cdiManager interface {
 // CPUInfoProvider is an interface for getting CPU information.
 // TODO(pravk03): This interface can be simplified. We can export only GetCPUTopology() and remove GetCPUInfos().
 type CPUInfoProvider interface {
-	GetCPUInfos() ([]cpuinfo.CPUInfo, error)
-	GetCPUTopology() (*cpuinfo.CPUTopology, error)
+	GetCPUInfos(logger logr.Logger) ([]cpuinfo.CPUInfo, error)
+	GetCPUTopology(logger logr.Logger) (*cpuinfo.CPUTopology, error)
 }
 
 // CPUDriver is the structure that holds all the driver runtime information.
@@ -121,7 +121,7 @@ func Start(ctx context.Context, clientset kubernetes.Interface, config *Config) 
 		claimTracker:           store.NewClaimTracker(),
 	}
 	cpuInfoProvider := cpuinfo.NewSystemCPUInfo()
-	topo, err := cpuInfoProvider.GetCPUTopology()
+	topo, err := cpuInfoProvider.GetCPUTopology(klog.FromContext(ctx))
 	if err != nil {
 		return nil, asyncErr, fmt.Errorf("failed to get CPU topology: %w", err)
 	}
