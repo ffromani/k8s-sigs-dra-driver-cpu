@@ -29,6 +29,7 @@ import (
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/ctxlog"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/store"
+	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
@@ -90,6 +91,7 @@ type CPUDriver struct {
 	deviceNameToCPUID      map[string]int
 	deviceNameToSocketID   map[string]int
 	deviceNameToNUMANodeID map[string]int
+	deviceSlices           [][]resourceapi.Device
 	reservedCPUs           cpuset.CPUSet
 	cpuDeviceMode          string
 	cpuDeviceGroupBy       string
@@ -139,6 +141,12 @@ func New(logger logr.Logger, clientset kubernetes.Interface, config *Config) (*C
 	plugin.cpuAllocationStore = store.NewCPUAllocation(plugin.cpuTopology, config.ReservedCPUs)
 	plugin.podConfigStore = store.NewPodConfig()
 	plugin.initializeDeviceLookupMaps()
+
+	if plugin.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
+		plugin.deviceSlices = plugin.createGroupedCPUDeviceSlices(logger)
+	} else {
+		plugin.deviceSlices = plugin.createCPUDeviceSlices()
+	}
 
 	return plugin, nil
 }
