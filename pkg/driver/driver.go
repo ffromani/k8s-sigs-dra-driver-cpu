@@ -91,6 +91,8 @@ type CPUDriver struct {
 	deviceNameToCPUID      map[string]int
 	deviceNameToSocketID   map[string]int
 	deviceNameToNUMANodeID map[string]int
+	individualDeviceInfos  []cpuDeviceInfo
+	groupedDeviceInfos     []groupedCPUDeviceInfo
 	deviceSlices           [][]resourceapi.Device
 	reservedCPUs           cpuset.CPUSet
 	cpuDeviceMode          string
@@ -140,6 +142,12 @@ func New(logger logr.Logger, clientset kubernetes.Interface, config *Config) (*C
 	plugin.cpuTopology = topo
 	plugin.cpuAllocationStore = store.NewCPUAllocation(plugin.cpuTopology, config.ReservedCPUs)
 	plugin.podConfigStore = store.NewPodConfig()
+
+	if plugin.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
+		plugin.groupedDeviceInfos = plugin.groupedCPUDeviceInfos()
+	} else {
+		plugin.individualDeviceInfos = plugin.cpuDeviceInfos()
+	}
 	plugin.initializeDeviceLookupMaps()
 
 	if plugin.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
