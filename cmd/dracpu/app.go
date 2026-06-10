@@ -169,7 +169,11 @@ func run(logger logr.Logger) error {
 		CPUDeviceMode:    driverFlags.CPUDeviceMode,
 		CPUDeviceGroupBy: driverFlags.GroupBy,
 	}
-	dracpu, asyncErr, err := driver.Start(ctx, clientset, driverConfig)
+	dracpu, err := driver.New(logger, clientset, driverConfig)
+	if err != nil {
+		return fmt.Errorf("driver failed to initialize: %w", err)
+	}
+	asyncErr, err := dracpu.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("driver failed to start: %w", err)
 	}
