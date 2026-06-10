@@ -421,7 +421,6 @@ func TestPrepareResourceClaims(t *testing.T) {
 			CPUInfoProvider: &cpuinfo.MockCPUInfoProvider{CPUInfos: mockCPUInfos_SingleSocket_4CPUS_HT},
 		})
 		require.NoError(t, err)
-		cp.initializeDeviceLookupMaps()
 		return cp
 	}
 
@@ -645,7 +644,6 @@ func TestPrepareResourceClaimsGroupedMode(t *testing.T) {
 			CPUInfoProvider:  &cpuinfo.MockCPUInfoProvider{CPUInfos: cpuInfos},
 		})
 		require.NoError(t, err)
-		driver.initializeDeviceLookupMaps()
 		for claimUID, cpus := range initialAllocations {
 			driver.cpuAllocationStore.AddResourceClaimAllocation(testr.New(t), claimUID, cpus)
 		}
@@ -963,7 +961,6 @@ func TestPrepareResourceClaimsRepeatedCalls(t *testing.T) {
 				CPUInfoProvider: &cpuinfo.MockCPUInfoProvider{CPUInfos: mockCPUInfos_SingleSocket_4CPUS_HT},
 			})
 			require.NoError(t, err)
-			driver.initializeDeviceLookupMaps()
 			// cdiMgr is created in Start(), which does filesystem I/O.
 			// Inject a mock here because we test New()-only paths.
 			driver.cdiMgr = newMockCdiMgr()

@@ -29,6 +29,7 @@ import (
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/ctxlog"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/store"
+	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
@@ -90,6 +91,7 @@ type CPUDriver struct {
 	deviceNameToCPUID      map[string]int
 	deviceNameToSocketID   map[string]int
 	deviceNameToNUMANodeID map[string]int
+	deviceSlices           [][]resourceapi.Device
 	reservedCPUs           cpuset.CPUSet
 	cpuDeviceMode          string
 	cpuDeviceGroupBy       string
@@ -138,6 +140,23 @@ func New(logger logr.Logger, clientset kubernetes.Interface, config *Config) (*C
 	plugin.cpuTopology = topo
 	plugin.cpuAllocationStore = store.NewCPUAllocation(plugin.cpuTopology, config.ReservedCPUs)
 	plugin.podConfigStore = store.NewPodConfig()
+
+	if plugin.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
+		for _, d := range groupedCPUDeviceInfos(plugin.cpuTopology, plugin.reservedCPUs, plugin.cpuDeviceGroupBy) {
+			switch plugin.cpuDeviceGroupBy {
+			case GROUP_BY_SOCKET:
+				plugin.deviceNameToSocketID[d.name] = d.socketID
+			case GROUP_BY_NUMA_NODE:
+				plugin.deviceNameToNUMANodeID[d.name] = d.numaNodeID
+			}
+		}
+		plugin.deviceSlices = plugin.createGroupedCPUDeviceSlices(logger)
+	} else {
+		for _, d := range cpuDeviceInfos(plugin.cpuTopology, plugin.reservedCPUs) {
+			plugin.deviceNameToCPUID[d.name] = d.cpu.CpuID
+		}
+		plugin.deviceSlices = plugin.createCPUDeviceSlices()
+	}
 
 	return plugin, nil
 }

@@ -240,23 +240,6 @@ func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
 	return slices.Collect(slices.Chunk(allDevices, maxDevicesPerResourceSlice))
 }
 
-func (cp *CPUDriver) initializeDeviceLookupMaps() {
-	if cp.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
-		for _, d := range groupedCPUDeviceInfos(cp.cpuTopology, cp.reservedCPUs, cp.cpuDeviceGroupBy) {
-			switch cp.cpuDeviceGroupBy {
-			case GROUP_BY_SOCKET:
-				cp.deviceNameToSocketID[d.name] = d.socketID
-			case GROUP_BY_NUMA_NODE:
-				cp.deviceNameToNUMANodeID[d.name] = d.numaNodeID
-			}
-		}
-		return
-	}
-	for _, d := range cpuDeviceInfos(cp.cpuTopology, cp.reservedCPUs) {
-		cp.deviceNameToCPUID[d.name] = d.cpu.CpuID
-	}
-}
-
 // PublishResources publishes ResourceSlice for CPU resources.
 func (cp *CPUDriver) PublishResources(ctx context.Context) {
 	ctx, logger := ctxlog.WithValues(ctx, "opID", generateShortID(opIDLen), "deviceMode", cp.cpuDeviceMode, "groupBy", cp.cpuDeviceGroupBy)
@@ -264,22 +247,13 @@ func (cp *CPUDriver) PublishResources(ctx context.Context) {
 	logger.V(4).Info("begin: publishing resources")
 	defer logger.V(4).Info("end: publishing resources")
 
-	cp.initializeDeviceLookupMaps()
-
-	var deviceChunks [][]resourceapi.Device
-	if cp.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
-		deviceChunks = cp.createGroupedCPUDeviceSlices(logger)
-	} else {
-		deviceChunks = cp.createCPUDeviceSlices()
-	}
-
-	if deviceChunks == nil {
+	if cp.deviceSlices == nil {
 		logger.Info("no devices to publish or error occurred")
 		return
 	}
 
-	slices := make([]resourceslice.Slice, 0, len(deviceChunks))
-	for _, chunk := range deviceChunks {
+	slices := make([]resourceslice.Slice, 0, len(cp.deviceSlices))
+	for _, chunk := range cp.deviceSlices {
 		slices = append(slices, resourceslice.Slice{Devices: chunk})
 	}
 
