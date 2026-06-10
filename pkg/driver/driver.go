@@ -145,14 +145,20 @@ func New(logger logr.Logger, clientset kubernetes.Interface, config *Config) (*C
 
 	if plugin.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
 		plugin.groupedDeviceInfos = plugin.groupedCPUDeviceInfos()
-	} else {
-		plugin.individualDeviceInfos = plugin.cpuDeviceInfos()
-	}
-	plugin.initializeDeviceLookupMaps()
-
-	if plugin.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
+		for _, d := range plugin.groupedDeviceInfos {
+			switch plugin.cpuDeviceGroupBy {
+			case GROUP_BY_SOCKET:
+				plugin.deviceNameToSocketID[d.name] = d.socketID
+			case GROUP_BY_NUMA_NODE:
+				plugin.deviceNameToNUMANodeID[d.name] = d.numaNodeID
+			}
+		}
 		plugin.deviceSlices = plugin.createGroupedCPUDeviceSlices(logger)
 	} else {
+		plugin.individualDeviceInfos = plugin.cpuDeviceInfos()
+		for _, d := range plugin.individualDeviceInfos {
+			plugin.deviceNameToCPUID[d.name] = d.cpu.CpuID
+		}
 		plugin.deviceSlices = plugin.createCPUDeviceSlices()
 	}
 
