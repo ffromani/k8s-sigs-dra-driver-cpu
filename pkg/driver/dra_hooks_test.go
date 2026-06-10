@@ -1061,6 +1061,68 @@ func TestUnprepareResourceClaims(t *testing.T) {
 	}
 }
 
+func TestPrepareResourceClaimsSucceedsBeforePublishResources(t *testing.T) {
+	claimUID := types.UID("claim-prepare-before-publish")
+
+	testCases := []struct {
+		name             string
+		cpuDeviceMode    string
+		cpuDeviceGroupBy string
+		claim            *resourceapi.ResourceClaim
+		expectedDevices  int
+	}{
+		{
+			name:          "individual mode",
+			cpuDeviceMode: CPU_DEVICE_MODE_INDIVIDUAL,
+			claim: testClaimWithResults(claimUID, []resourceapi.DeviceRequestAllocationResult{
+				{Driver: testDriverName, Pool: testNodeName, Device: "cpudev000"},
+				{Driver: testDriverName, Pool: testNodeName, Device: "cpudev001"},
+			}),
+			expectedDevices: 2,
+		},
+		{
+			name:             "socket grouped",
+			cpuDeviceMode:    CPU_DEVICE_MODE_GROUPED,
+			cpuDeviceGroupBy: GROUP_BY_SOCKET,
+			claim:            testClaim(claimUID, testDriverName, testNodeName, map[string]int64{"cpudevsocket000": 2}),
+			expectedDevices:  1,
+		},
+		{
+			name:             "numa grouped",
+			cpuDeviceMode:    CPU_DEVICE_MODE_GROUPED,
+			cpuDeviceGroupBy: GROUP_BY_NUMA_NODE,
+			claim:            testClaim(claimUID, testDriverName, testNodeName, map[string]int64{"cpudevnuma000": 2}),
+			expectedDevices:  1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			driver, err := Setup(context.Background(), nil, &Config{
+				DriverName:       testDriverName,
+				NodeName:         testNodeName,
+				CPUDeviceMode:    tc.cpuDeviceMode,
+				CPUDeviceGroupBy: tc.cpuDeviceGroupBy,
+				CPUInfoProvider:  &cpuinfo.MockCPUInfoProvider{CPUInfos: mockCPUInfos_DualSocket_4CPUsPerSocket_HT},
+			})
+			require.NoError(t, err)
+			// cdiMgr is created in Start(), which does filesystem I/O.
+			// Inject a mock here because we test Setup()-only paths.
+			driver.cdiMgr = newMockCdiMgr()
+
+			preparedClaims, err := driver.PrepareResourceClaims(context.Background(), []*resourceapi.ResourceClaim{tc.claim})
+			require.NoError(t, err)
+
+			result := preparedClaims[claimUID]
+			require.NoError(t, result.Err)
+			require.Len(t, result.Devices, tc.expectedDevices)
+			for _, dev := range result.Devices {
+				require.NotEmpty(t, dev.CDIDeviceIDs, "device %s has no CDI device IDs", dev.DeviceName)
+			}
+		})
+	}
+}
+
 func testClaimWithResults(claimUID types.UID, results []resourceapi.DeviceRequestAllocationResult) *resourceapi.ResourceClaim {
 	return &resourceapi.ResourceClaim{
 		ObjectMeta: metav1.ObjectMeta{UID: claimUID, Name: string(claimUID)},
