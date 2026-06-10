@@ -55,77 +55,82 @@ const (
 	cpuDeviceNUMAGroupedPrefix   = "cpudevnuma"
 )
 
+type groupedCPUDeviceInfo struct {
+	name       string
+	cpus       cpuset.CPUSet
+	socketID   int
+	numaNodeID int
+}
+
+func groupedCPUDeviceInfos(topo *cpuinfo.CPUTopology, reservedCPUs cpuset.CPUSet, groupBy string) []groupedCPUDeviceInfo {
+	var devices []groupedCPUDeviceInfo
+
+	switch groupBy {
+	case GROUP_BY_SOCKET:
+		for _, socketID := range topo.CPUDetails.Sockets().List() {
+			allocatableCPUs := topo.CPUDetails.CPUsInSockets(socketID).Difference(reservedCPUs)
+			if allocatableCPUs.Size() == 0 {
+				continue
+			}
+			devices = append(devices, groupedCPUDeviceInfo{
+				name:     fmt.Sprintf("%s%03d", cpuDeviceSocketGroupedPrefix, socketID),
+				cpus:     allocatableCPUs,
+				socketID: socketID,
+			})
+		}
+	case GROUP_BY_NUMA_NODE:
+		for _, numaID := range topo.CPUDetails.NUMANodes().List() {
+			allocatableCPUs := topo.CPUDetails.CPUsInNUMANodes(numaID).Difference(reservedCPUs)
+			if allocatableCPUs.Size() == 0 {
+				continue
+			}
+			// All CPUs in a NUMA node belong to the same socket.
+			anyCPU := allocatableCPUs.UnsortedList()[0]
+			devices = append(devices, groupedCPUDeviceInfo{
+				name:       fmt.Sprintf("%s%03d", cpuDeviceNUMAGroupedPrefix, numaID),
+				cpus:       allocatableCPUs,
+				socketID:   topo.CPUDetails[anyCPU].SocketID,
+				numaNodeID: numaID,
+			})
+		}
+	}
+	return devices
+}
+
 // createGroupedCPUDeviceSlices creates Device objects based on the CPU topology, grouped by a specific criteria.
 func (cp *CPUDriver) createGroupedCPUDeviceSlices(logger logr.Logger) [][]resourceapi.Device {
 	logger.V(4).Info("creating grouped CPU devices")
 	var devices []resourceapi.Device
 
-	topo := cp.cpuTopology
+	for _, di := range groupedCPUDeviceInfos(cp.cpuTopology, cp.reservedCPUs, cp.cpuDeviceGroupBy) {
+		availableCPUs := int64(di.cpus.Size())
+		deviceCapacity := map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
+			cpuResourceQualifiedName: {Value: *resource.NewQuantity(availableCPUs, resource.DecimalSI)},
+		}
 
-	switch cp.cpuDeviceGroupBy {
-	case GROUP_BY_SOCKET:
-		socketIDs := topo.CPUDetails.Sockets().List()
-		for _, socketID := range socketIDs {
-			deviceName := fmt.Sprintf("%s%03d", cpuDeviceSocketGroupedPrefix, socketID)
-			socketCPUSet := topo.CPUDetails.CPUsInSockets(socketID)
-			allocatableCPUs := socketCPUSet.Difference(cp.reservedCPUs)
-			availableCPUsInSocket := int64(allocatableCPUs.Size())
-
-			if allocatableCPUs.Size() == 0 {
-				continue
-			}
-
-			deviceCapacity := map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-				cpuResourceQualifiedName: {Value: *resource.NewQuantity(availableCPUsInSocket, resource.DecimalSI)},
-			}
-
-			cp.deviceNameToSocketID[deviceName] = socketID
-
+		switch cp.cpuDeviceGroupBy {
+		case GROUP_BY_SOCKET:
 			deviceAttrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-				"dra.cpu/socketID":   {IntValue: ptr.To(int64(socketID))},
-				"dra.cpu/numCPUs":    {IntValue: ptr.To(availableCPUsInSocket)},
+				"dra.cpu/socketID":   {IntValue: ptr.To(int64(di.socketID))},
+				"dra.cpu/numCPUs":    {IntValue: ptr.To(availableCPUs)},
 				"dra.cpu/smtEnabled": {BoolValue: ptr.To(cp.cpuTopology.SMTEnabled)},
 			}
-
 			devices = append(devices, resourceapi.Device{
-				Name:                     deviceName,
+				Name:                     di.name,
 				Attributes:               deviceAttrs,
 				Capacity:                 deviceCapacity,
 				AllowMultipleAllocations: ptr.To(true),
 			})
-		}
-	case GROUP_BY_NUMA_NODE:
-		numaNodeIDs := topo.CPUDetails.NUMANodes().List()
-		for _, numaID := range numaNodeIDs {
-			deviceName := fmt.Sprintf("%s%03d", cpuDeviceNUMAGroupedPrefix, numaID)
-			numaNodeCPUSet := topo.CPUDetails.CPUsInNUMANodes(numaID)
-			allocatableCPUs := numaNodeCPUSet.Difference(cp.reservedCPUs)
-			availableCPUsInNUMANode := int64(allocatableCPUs.Size())
-
-			if allocatableCPUs.Size() == 0 {
-				continue
-			}
-
-			// All CPUs in a NUMA node belong to the same socket.
-			anyCPU := allocatableCPUs.UnsortedList()[0]
-			socketID := int64(topo.CPUDetails[anyCPU].SocketID)
-
-			deviceCapacity := map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-				cpuResourceQualifiedName: {Value: *resource.NewQuantity(availableCPUsInNUMANode, resource.DecimalSI)},
-			}
-
-			cp.deviceNameToNUMANodeID[deviceName] = numaID
-
+		case GROUP_BY_NUMA_NODE:
 			deviceAttrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-				"dra.cpu/numaNodeID": {IntValue: ptr.To(int64(numaID))},
-				"dra.cpu/socketID":   {IntValue: ptr.To(socketID)},
+				"dra.cpu/numaNodeID": {IntValue: ptr.To(int64(di.numaNodeID))},
+				"dra.cpu/socketID":   {IntValue: ptr.To(int64(di.socketID))},
 				"dra.cpu/smtEnabled": {BoolValue: ptr.To(cp.cpuTopology.SMTEnabled)},
-				"dra.cpu/numCPUs":    {IntValue: ptr.To(availableCPUsInNUMANode)},
+				"dra.cpu/numCPUs":    {IntValue: ptr.To(availableCPUs)},
 			}
-			device.SetCompatibilityAttributes(deviceAttrs, int64(numaID))
-
+			device.SetCompatibilityAttributes(deviceAttrs, int64(di.numaNodeID))
 			devices = append(devices, resourceapi.Device{
-				Name:                     deviceName,
+				Name:                     di.name,
 				Attributes:               deviceAttrs,
 				Capacity:                 deviceCapacity,
 				AllowMultipleAllocations: ptr.To(true),
@@ -139,22 +144,22 @@ func (cp *CPUDriver) createGroupedCPUDeviceSlices(logger logr.Logger) [][]resour
 	return [][]resourceapi.Device{devices}
 }
 
-// CreateCPUDeviceSlices creates Device objects based on the CPU topology.
-// It groups CPUs by physical core to assign consecutive device IDs to hyperthreads.
-// This allows the DRA scheduler, which requests resources in contiguous blocks,
-// to co-locate workloads on hyperthreads of the same core.
-func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
-	reservedCPUs := make(map[int]bool)
-	for _, cpuID := range cp.reservedCPUs.List() {
-		reservedCPUs[cpuID] = true
+type cpuDeviceInfo struct {
+	name string
+	cpu  cpuinfo.CPUInfo
+}
+
+func cpuDeviceInfos(topo *cpuinfo.CPUTopology, reservedCPUs cpuset.CPUSet) []cpuDeviceInfo {
+	reserved := make(map[int]bool)
+	for _, cpuID := range reservedCPUs.List() {
+		reserved[cpuID] = true
 	}
 
-	var availableCPUs []cpuinfo.CPUInfo
-	topo := cp.cpuTopology
 	allCPUs := make([]cpuinfo.CPUInfo, 0, len(topo.CPUDetails))
+	var availableCPUs []cpuinfo.CPUInfo
 	for _, cpu := range topo.CPUDetails {
 		allCPUs = append(allCPUs, cpu)
-		if !reservedCPUs[cpu.CpuID] {
+		if !reserved[cpu.CpuID] {
 			availableCPUs = append(availableCPUs, cpu)
 		}
 	}
@@ -173,7 +178,7 @@ func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
 		if processedCpus[cpu.CpuID] {
 			continue
 		}
-		if cpu.SiblingCPUID == -1 || reservedCPUs[cpu.SiblingCPUID] {
+		if cpu.SiblingCPUID == -1 || reserved[cpu.SiblingCPUID] {
 			coreGroups = append(coreGroups, []cpuinfo.CPUInfo{cpu})
 			processedCpus[cpu.CpuID] = true
 		} else {
@@ -187,31 +192,44 @@ func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
 		return coreGroups[i][0].CpuID < coreGroups[j][0].CpuID
 	})
 
-	devId := 0
-	var allDevices []resourceapi.Device
+	var devices []cpuDeviceInfo
+	devID := 0
 	for _, group := range coreGroups {
 		for _, cpu := range group {
-			deviceAttrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-				"dra.cpu/numaNodeID": {IntValue: ptr.To(int64(cpu.NUMANodeID))},
-				"dra.cpu/socketID":   {IntValue: ptr.To(int64(cpu.SocketID))},
-				"dra.cpu/smtEnabled": {BoolValue: ptr.To(cp.cpuTopology.SMTEnabled)},
-				"dra.cpu/cacheL3ID":  {IntValue: ptr.To(int64(cpu.UncoreCacheID))},
-				"dra.cpu/coreType":   {StringValue: ptr.To(cpu.CoreType.String())},
-				"dra.cpu/coreID":     {IntValue: ptr.To(int64(cpu.CoreID))},
-				"dra.cpu/cpuID":      {IntValue: ptr.To(int64(cpu.CpuID))},
-			}
-			device.SetCompatibilityAttributes(deviceAttrs, int64(cpu.NUMANodeID))
-
-			deviceName := fmt.Sprintf("%s%03d", cpuDevicePrefix, devId)
-			devId++
-			cp.deviceNameToCPUID[deviceName] = cpu.CpuID
-			cpuDevice := resourceapi.Device{
-				Name:       deviceName,
-				Attributes: deviceAttrs,
-				Capacity:   make(map[resourceapi.QualifiedName]resourceapi.DeviceCapacity),
-			}
-			allDevices = append(allDevices, cpuDevice)
+			devices = append(devices, cpuDeviceInfo{
+				name: fmt.Sprintf("%s%03d", cpuDevicePrefix, devID),
+				cpu:  cpu,
+			})
+			devID++
 		}
+	}
+	return devices
+}
+
+// createCPUDeviceSlices creates Device objects based on the CPU topology.
+// It groups CPUs by physical core to assign consecutive device IDs to hyperthreads.
+// This allows the DRA scheduler, which requests resources in contiguous blocks,
+// to co-locate workloads on hyperthreads of the same core.
+func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
+	var allDevices []resourceapi.Device
+	for _, di := range cpuDeviceInfos(cp.cpuTopology, cp.reservedCPUs) {
+		cpu := di.cpu
+		deviceAttrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+			"dra.cpu/numaNodeID": {IntValue: ptr.To(int64(cpu.NUMANodeID))},
+			"dra.cpu/socketID":   {IntValue: ptr.To(int64(cpu.SocketID))},
+			"dra.cpu/smtEnabled": {BoolValue: ptr.To(cp.cpuTopology.SMTEnabled)},
+			"dra.cpu/cacheL3ID":  {IntValue: ptr.To(int64(cpu.UncoreCacheID))},
+			"dra.cpu/coreType":   {StringValue: ptr.To(cpu.CoreType.String())},
+			"dra.cpu/coreID":     {IntValue: ptr.To(int64(cpu.CoreID))},
+			"dra.cpu/cpuID":      {IntValue: ptr.To(int64(cpu.CpuID))},
+		}
+		device.SetCompatibilityAttributes(deviceAttrs, int64(cpu.NUMANodeID))
+
+		allDevices = append(allDevices, resourceapi.Device{
+			Name:       di.name,
+			Attributes: deviceAttrs,
+			Capacity:   make(map[resourceapi.QualifiedName]resourceapi.DeviceCapacity),
+		})
 	}
 
 	if len(allDevices) == 0 {
@@ -222,12 +240,31 @@ func (cp *CPUDriver) createCPUDeviceSlices() [][]resourceapi.Device {
 	return slices.Collect(slices.Chunk(allDevices, maxDevicesPerResourceSlice))
 }
 
+func (cp *CPUDriver) initializeDeviceLookupMaps() {
+	if cp.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
+		for _, d := range groupedCPUDeviceInfos(cp.cpuTopology, cp.reservedCPUs, cp.cpuDeviceGroupBy) {
+			switch cp.cpuDeviceGroupBy {
+			case GROUP_BY_SOCKET:
+				cp.deviceNameToSocketID[d.name] = d.socketID
+			case GROUP_BY_NUMA_NODE:
+				cp.deviceNameToNUMANodeID[d.name] = d.numaNodeID
+			}
+		}
+		return
+	}
+	for _, d := range cpuDeviceInfos(cp.cpuTopology, cp.reservedCPUs) {
+		cp.deviceNameToCPUID[d.name] = d.cpu.CpuID
+	}
+}
+
 // PublishResources publishes ResourceSlice for CPU resources.
 func (cp *CPUDriver) PublishResources(ctx context.Context) {
 	ctx, logger := ctxlog.WithValues(ctx, "opID", generateShortID(opIDLen), "deviceMode", cp.cpuDeviceMode, "groupBy", cp.cpuDeviceGroupBy)
 
 	logger.V(4).Info("begin: publishing resources")
 	defer logger.V(4).Info("end: publishing resources")
+
+	cp.initializeDeviceLookupMaps()
 
 	var deviceChunks [][]resourceapi.Device
 	if cp.cpuDeviceMode == CPU_DEVICE_MODE_GROUPED {
