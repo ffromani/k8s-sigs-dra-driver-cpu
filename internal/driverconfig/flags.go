@@ -20,8 +20,42 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 )
+
+type FlagSource struct {
+	flagset *flag.FlagSet
+}
+
+func FromFlags(flagset *flag.FlagSet) FlagSource {
+	return FlagSource{
+		flagset: flagset,
+	}
+}
+
+func (fs FlagSource) Name() string {
+	return "flags"
+}
+
+func (fs FlagSource) Apply(logger logr.Logger, cfg *Config) error {
+	overrides := make(map[string]any)
+	fs.flagset.Visit(func(f *flag.Flag) {
+		key, ok := flagToJSONKey[f.Name]
+		if !ok {
+			return
+		}
+		getter, ok := f.Value.(flag.Getter)
+		if !ok {
+			logger.V(2).Info("flag does not support the Getter interface, using as string", "name", f.Name)
+			overrides[key] = f.Value.String()
+			return
+		}
+		overrides[key] = getter.Get()
+	})
+	logger.V(6).Info("overrides", "stage", fs.Name(), "values", overrides)
+	return applyMap(cfg, overrides)
+}
 
 // AddFlags registers every Config field as a CLI flag on fs.
 func (c *Config) AddFlags(fs *flag.FlagSet) {
