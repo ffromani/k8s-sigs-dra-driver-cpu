@@ -6,17 +6,28 @@ is the reference: compatibility, runtime setup, security, uninstall, and migrati
 
 ## Compatibility
 
+Kubernetes requirements:
+The driver does **not** support mixed environments; both the control plane and the kubelet
+version should match.
+
+| Version | Status |
+| ------------------ | --------------------- |
+| 1.33 or older | Not supported. |
+| 1.34–1.35 | Supported. Grouped mode (default) requires `DRAConsumableCapacity` enabled. |
+| 1.36 | Supported. |
+| 1.37 | Recommended. `DRANodeAllocatableResources` should be enabled for best experience. |
+
+Other requirements:
+
 | Requirement       | Minimum                                                                                                                   |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Kubernetes        | **1.34** (DRA `resource.k8s.io/v1` is GA and enabled by default)                                                          |
 | Container runtime | containerd **2.0** or CRI-O **1.30** (NRI and CDI enabled by default)                                                     |
-| Kubelet           | CPUManager disabled: `cpuManagerPolicy: none` — see [Configuration](configuration.md#kubelet-configuration-prerequisites) |
+| Kubelet configuration | CPUManager disabled: `cpuManagerPolicy: none` — see [Configuration](configuration.md#kubelet-configuration-prerequisites) |
 
 Optional features need additional cluster feature gates:
 
 | Feature                                                     | Kubernetes feature gate                                |
 | ----------------------------------------------------------- | ------------------------------------------------------ |
-| `grouped` device mode (the default) on Kubernetes 1.34/1.35 | `DRAConsumableCapacity` (enabled by default from 1.36) |
 | PCIe root attributes (`--expose-pcie-roots`)                | `DRAListTypeAttributes`                                |
 
 The driver is Linux-only and needs node-level privileges (host networking, and NRI socket,
