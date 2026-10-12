@@ -15,6 +15,11 @@ Before the driver enters beta stage, a batch of **breaking** changes are planned
 The idea is to coalesce together all the known backward incompatible changes in release 0.4.0.
 We advice users wishing to prepare early to track the linked issues.
 
+The configuration flags deprecated in 0.3.0 are removed: `--cpu-device-mode`,
+`--group-by`, `--reserved-cpus`, `--hostname-override`, and `--sysfs-overlay`.
+Move their values into the corresponding configuration file fields; see
+[Command-line flags](configuration.md#command-line-flags).
+
 Anticipated breaking or possibly breaking changes are:
 
 - breaking: memory support (https://github.com/kubernetes-sigs/dra-driver-cpu/issues/36)

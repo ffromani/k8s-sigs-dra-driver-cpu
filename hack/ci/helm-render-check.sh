@@ -49,15 +49,9 @@ accepts() {
 		-expect-root-flag="${want_flag}"
 }
 
-# checkHostnameOverride <name> <want_config> [helm args...]; runs one node
-# name override case. With nothing configured the kernel hostname may differ
-# from the Node object name (e.g. it is an IP address), which breaks
-# ResourceSlice publishing, so the chart must pass the flag expanded from the
-# downward API. A non-empty <want_config> is an explicit override: it reaches
-# the driver through the config file, so the flag must stay absent (a flag
-# would shadow the config file) and the value must fold into the rendered
-# config.yaml. This intentionally duplicates and then changes the existing
-# accepts to keep the new checks fully isolated.
+# checkHostnameOverride <name> <want_config> [helm args...]: verify the
+# absence of the removed CLI flag and preservation of any explicit
+# configuration-file override.
 checkHostnameOverride() {
 	local name=$1 want_config=$2
 	shift 2
@@ -71,9 +65,6 @@ checkHostnameOverride() {
 		-expect-root-flag=false
 		-check-hostname-override
 	)
-	if [[ -n ${want_config} ]]; then
-		test_args+=(-expected-override='')
-	fi
 	go test -count=1 ./test/render/ -args "${test_args[@]}"
 
 	if [[ -n ${want_config} ]]; then

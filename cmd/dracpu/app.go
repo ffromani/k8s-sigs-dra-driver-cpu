@@ -199,7 +199,7 @@ func run(logger logr.Logger, cfg driverconfig.Config) error {
 
 	nodeName, err := nodeutil.GetHostname(cfg.HostnameOverride)
 	if err != nil {
-		return fmt.Errorf("can not obtain the node name, use the hostname-override flag if you want to set it to a specific value: %w", err)
+		return fmt.Errorf("can not obtain the node name, set hostnameOverride in the configuration file if you want to set it to a specific value: %w", err)
 	}
 
 	// Cancel the context on interactive interruption (SIGINT) or the default Pod

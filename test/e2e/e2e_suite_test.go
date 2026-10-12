@@ -55,10 +55,6 @@ func TestE2E(t *testing.T) {
 
 const (
 	driverName            = "dra.cpu"
-	argReservedCPUs       = "--reserved-cpus="
-	argCPUDeviceMode      = "--cpu-device-mode="
-	argGroupBy            = "--group-by="
-	argAllocator          = "--allocator="
 	daemonSetNamespace    = "kube-system"
 	daemonSetLabel        = "app=dracpu"
 	driverPodPollInterval = 2 * time.Second
@@ -354,18 +350,6 @@ func getDriverConfigValues(ctx context.Context, client kubernetes.Interface, nam
 			return values, fmt.Errorf("parsing driver config configmap for daemonset %s: %w", ds.Name, err)
 		}
 		return values, nil
-	}
-	if val, ok := findArgInContainer(cnt, argCPUDeviceMode); ok {
-		values.CPUDeviceMode = val
-	}
-	if val, ok := findArgInContainer(cnt, argGroupBy); ok {
-		values.GroupBy = val
-	}
-	if val, ok := findArgInContainer(cnt, argAllocator); ok {
-		values.Allocator = val
-	}
-	if val, ok := findArgInContainer(cnt, argReservedCPUs); ok {
-		values.ReservedCPUs = val
 	}
 	return values, nil
 }

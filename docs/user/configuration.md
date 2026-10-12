@@ -1,14 +1,14 @@
 # Configuration
 
 This page covers configuring the driver itself, the kubelet prerequisites required to run it,
-and the command-line flags currently being deprecated in favour of the configuration file.
+and the command-line flags removed in favour of the configuration file.
 
 ## Driver configuration
 
 The driver supports two configuration mechanisms:
 
 - The config file - the main, preferred way to configure the driver.
-- Command-line flags — kept for a small set of important, mostly behavior altering settings and for backward compatibility. Some flags are being deprecated in favor of their config file equivalent (see [Helm: deprecated args values vs driverConfig](#helm-deprecated-args-values-vs-driverconfig) below).
+- Command-line flags — kept for a small set of operational and deployment settings. The previously deprecated configuration flags are removed; see [Command-line flags](#command-line-flags) below. Deprecated Helm `args.*` values still fold into the configuration file (see [Helm: deprecated args values vs driverConfig](#helm-deprecated-args-values-vs-driverconfig)).
 
 If the same setting is provided both ways, the explicit command-line flag wins, so avoid mixing
 the two for the same field.
@@ -106,7 +106,8 @@ on - is configured through other Helm values, not through this file.
 
 `hostnameOverride` (string)
 
-- Override the node hostname the driver registers under.
+- Override the node hostname the driver registers under. When unset, the driver
+  uses the kernel hostname.
 
 `kubeconfig` (string)
 
@@ -169,13 +170,13 @@ never chart values, so they are rejected rather than ignored.
 
 ### Command-line flags
 
-**NOTE:** Command-line flags are kept mainly for backward compatibility. Prefer the
+**NOTE:** Prefer the
 [configuration file](#configuration-file) above for new deployments.
 
-`--cpu-device-mode`, `--group-by`, `--reserved-cpus`, `--hostname-override`, `--sysfs-overlay`
-are deprecated in favour of their config file equivalents and will be removed in a future
-release ([issue #245](https://github.com/kubernetes-sigs/dra-driver-cpu/issues/245)). Each is
-marked as deprecated in `--help`, and passing one explicitly logs a startup warning.
+`--cpu-device-mode`, `--group-by`, `--reserved-cpus`, `--hostname-override`, and
+`--sysfs-overlay` were deprecated in 0.3.0 and are removed in the 0.4.0 development
+cycle ([issue #245](https://github.com/kubernetes-sigs/dra-driver-cpu/issues/245)).
+Replace them with these configuration file fields:
 
 - `--cpu-device-mode` → `cpuDeviceMode`
 - `--group-by` → `groupBy`
@@ -183,7 +184,7 @@ marked as deprecated in `--help`, and passing one explicitly logs a startup warn
 - `--hostname-override` → `hostnameOverride`
 - `--sysfs-overlay` → `sysfsOverlay`
 
-The remaining flags aren't part of that deprecation:
+The remaining supported flags are:
 
 - `--config`: path to the config file described above.
 - `--kubeconfig`: path to a kubeconfig file, for out-of-cluster use. Also settable via the `kubeconfig` config field.
@@ -192,14 +193,15 @@ The remaining flags aren't part of that deprecation:
   devices, reporting the PCIe roots close to each device. Since it always reports values
   as a list, this option requires the cluster feature gate `DRAListTypeAttributes` (see
   KEP 5491) to be enabled. The driver cannot introspect the cluster feature gate, so
-  enable the feature gate first and this option second. Unlike the flags above, it is not
-  deprecated and has no config file equivalent — it is intentionally excluded from the
-  config file (see [driverConfig sub-fields](#driverconfig-sub-fields) above) and stays a
-  standalone flag (or Helm `args.exposePCIeRoots`).
+  enable the feature gate first and this option second. **Deprecated:** this flag will
+  be replaced by versioned configuration and removed in a future release. Explicit
+  use, including `--expose-pcie-roots=false`, logs a startup warning. The current
+  `v1alpha1` file format still excludes this setting, so there is no file replacement
+  yet. Helm `args.exposePCIeRoots` remains functional during this transition.
 - `--kubelet-root-dir`: the kubelet's own root directory (default `/var/lib/kubelet`).
   Running the binary directly, or writing the manifests by hand, the flag is the way to set
   the root, together with matching `<root>/plugins` and `<root>/plugins_registry` mounts.
-  Like `--expose-pcie-roots`, it is not deprecated and has no config file equivalent: the
+  It is not deprecated and has no config file equivalent: the
   chart owns this value, not `driverConfig`.
 
 ## Kubelet configuration prerequisites
