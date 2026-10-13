@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kubernetes-sigs/dra-driver-cpu/api/v1alpha1"
+	"github.com/kubernetes-sigs/dra-driver-cpu/api/opaque/v1alpha1"
 	"k8s.io/utils/cpuset"
 )
 

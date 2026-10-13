@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubernetes-sigs/dra-driver-cpu/api/v1alpha1"
+	opaquev1a1 "github.com/kubernetes-sigs/dra-driver-cpu/api/opaque/v1alpha1"
 	"github.com/kubernetes-sigs/dra-driver-cpu/test/pkg/discovery"
 	"github.com/kubernetes-sigs/dra-driver-cpu/test/pkg/fixture"
 	podmatchers "github.com/kubernetes-sigs/dra-driver-cpu/test/pkg/matchers/pod"
@@ -430,9 +430,9 @@ func makeResourceClaimSpecWithOpaqueConfig(cpus int, isConsumable bool, cpusetSt
 	ginkgo.GinkgoHelper()
 	spec := makeResourceClaimSpec(cpus, isConsumable)
 	if cpusetStr != "" {
-		config := v1alpha1.OpaqueConfig{
-			APIVersion: v1alpha1.APIVersion,
-			CPUConfig: v1alpha1.CPUConfig{
+		config := opaquev1a1.OpaqueConfig{
+			APIVersion: opaquev1a1.APIVersion,
+			CPUConfig: opaquev1a1.CPUConfig{
 				CPUSet: cpusetStr,
 			},
 		}

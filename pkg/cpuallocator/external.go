@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	opaqueapi "github.com/kubernetes-sigs/dra-driver-cpu/api"
+	opaqueapi "github.com/kubernetes-sigs/dra-driver-cpu/api/opaque"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/dynamic-resource-allocation/resourceclaim"
