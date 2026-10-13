@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/kubernetes-sigs/dra-driver-cpu/api/config/v1alpha1"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/buildinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuinfo"
@@ -39,10 +40,10 @@ const LayoutVersion = "v1"
 const driverProcessName = "dracpu"
 
 type Report struct {
-	ToolVersion   ToolVersion         `json:"toolVersion"`
-	LayoutVersion string              `json:"layoutVersion"`
-	CPUDetails    CPUDetails          `json:"cpuDetails"`
-	DriverConfig  driverconfig.Config `json:"driverConfig"`
+	ToolVersion   ToolVersion     `json:"toolVersion"`
+	LayoutVersion string          `json:"layoutVersion"`
+	CPUDetails    CPUDetails      `json:"cpuDetails"`
+	DriverConfig  v1alpha1.Config `json:"driverConfig"`
 }
 
 type CPUDetails struct {
@@ -225,7 +226,7 @@ func collectReport(logger logr.Logger, driverCmdlinePath string) (Report, error)
 			Topology: makeTopologySummary(topology),
 			CPUs:     makeCPUList(cpus),
 		},
-		DriverConfig: driverConfig,
+		DriverConfig: driverconfig.ToV1Alpha1(driverConfig),
 	}, nil
 }
 
@@ -289,6 +290,10 @@ func (ConfigSource) Name() string {
 	return "gatherinfo"
 }
 
+func (cs ConfigSource) String() string {
+	return cs.DriverCmdlinePath
+}
+
 func (cs ConfigSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error {
 	cmdline, err := readCmdlineFile(cs.DriverCmdlinePath)
 	if err != nil || len(cmdline) == 0 {
@@ -300,10 +305,10 @@ func (cs ConfigSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error
 		return nil
 	}
 
-	var conf driverconfig.Config // storage space for flag values
+	var cliopts driverconfig.CLIOptions // storage space for flag values
 	fs := flag.NewFlagSet("detect-driver-config", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	conf.AddFlags(fs)
+	cliopts.AddFlags(fs)
 	var configFile string
 	fs.StringVar(&configFile, "config", "", "")
 	if err := fs.Parse(knownConfigArgs(fs, cmdline[1:])); err != nil {
@@ -319,7 +324,7 @@ func (cs ConfigSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error
 	}
 
 	// flags applied last so they win over file values
-	_ = driverconfig.FromFlags(fs).Apply(logger, cfg)
+	_ = driverconfig.FromFlags(cliopts).Apply(logger, cfg)
 	return nil
 }
 

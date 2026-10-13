@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Internal package test: uses reflection over the unexported Config fields.
+// Internal package test: verifies coverage of the diagnostic field names.
 package driverconfig
 
 import (
@@ -23,7 +23,7 @@ import (
 	"testing"
 )
 
-// TestConfigLogValues_CoversAllFields: every Config json field has a LogValues key.
+// TestConfigLogValues_CoversAllFields: every diagnostic field has a LogValues key.
 func TestConfigLogValues_CoversAllFields(t *testing.T) {
 	loggedKeys := map[string]bool{}
 	values := Config{}.LogValues()
@@ -33,7 +33,7 @@ func TestConfigLogValues_CoversAllFields(t *testing.T) {
 		}
 	}
 
-	typ := reflect.TypeFor[Config]()
+	typ := reflect.TypeFor[dumpConfig]()
 	for field := range typ.Fields() {
 		jsonName, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 		if jsonName == "" || jsonName == "-" {
@@ -45,12 +45,12 @@ func TestConfigLogValues_CoversAllFields(t *testing.T) {
 	}
 }
 
-// TestConfigDump_IncludesZeroValues: every Config json field appears in Dump,
+// TestConfigDump_IncludesZeroValues: every diagnostic field appears in Dump,
 // even at its zero value.
 func TestConfigDump_IncludesZeroValues(t *testing.T) {
 	out := Config{}.Dump()
 
-	typ := reflect.TypeFor[Config]()
+	typ := reflect.TypeFor[dumpConfig]()
 	for field := range typ.Fields() {
 		jsonName, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 		if jsonName == "" || jsonName == "-" {

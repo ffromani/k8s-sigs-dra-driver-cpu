@@ -28,17 +28,18 @@ import (
 
 	"github.com/go-logr/logr/funcr"
 	"github.com/go-logr/logr/testr"
+	"github.com/kubernetes-sigs/dra-driver-cpu/api/config/v1alpha1"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// newFlagSet creates a FlagSet with cfg registered and args parsed.
-func newFlagSet(t *testing.T, cfg *driverconfig.Config, args []string) *flag.FlagSet {
+// newFlagSet creates a FlagSet with cliopts registered and args parsed.
+func newFlagSet(t *testing.T, cliopts *driverconfig.CLIOptions, args []string) *flag.FlagSet {
 	t.Helper()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	cfg.AddFlags(fs)
+	cliopts.AddFlags(fs)
 	require.NoError(t, fs.Parse(args))
 	return fs
 }
@@ -91,26 +92,26 @@ apiVersion: v1alpha1
 kubeconfig: /from-file
 `)
 
-	var cfg driverconfig.Config
-	fs := newFlagSet(t, &cfg, []string{
+	cliopts := driverconfig.DefaultCLIOptions()
+	newFlagSet(t, &cliopts, []string{
 		"--kubeconfig=/from-cli",
 	})
 
+	assert.Equal(t, "/from-cli", cliopts.Kubeconfig.Value)
+	assert.True(t, cliopts.Kubeconfig.Set)
+
 	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
 		driverconfig.FromFile(cfgFile),
-		driverconfig.FromFlags(fs),
+		driverconfig.FromFlags(cliopts),
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "/from-cli", result.Kubeconfig)
 }
 
-// TestResolve_RejectsAmbiguousKeys covers the ways a config file can reach a field
-// without naming it the way the schema does. Each has to fail, and the message
-// has to say what to write instead: for an excluded field that is the
-// alternative setting rather than the canonical spelling, which the next check
-// refuses anyway, and a name matching no field at all stays the decoder's to
-// report.
+// TestResolve_RejectsAmbiguousKeys checks case-sensitive field names, duplicate
+// keys, and deployment-only fields. Incorrectly cased public fields are unknown;
+// deployment-only fields retain hints about their supported alternatives.
 func TestResolve_RejectsAmbiguousKeys(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -121,26 +122,25 @@ func TestResolve_RejectsAmbiguousKeys(t *testing.T) {
 	}{{
 		name:         "folded spelling",
 		file:         "apiVersion: v1alpha1\nreservedcpus: \"0-3\"\n",
-		wantContains: []string{"reservedcpus", "reservedCPUs"},
+		wantContains: []string{`unknown field "reservedcpus"`},
 	}, {
 		name:         "folded spelling, mixed case",
 		file:         "apiVersion: v1alpha1\nReservedCPUs: \"0-3\"\n",
-		wantContains: []string{"ReservedCPUs", "reservedCPUs"},
+		wantContains: []string{`unknown field "ReservedCPUs"`},
 	}, {
 		name:         "folded spelling, upper case",
 		file:         "apiVersion: v1alpha1\nRESERVEDCPUS: \"0-3\"\n",
-		wantContains: []string{"RESERVEDCPUS", "reservedCPUs"},
+		wantContains: []string{`unknown field "RESERVEDCPUS"`},
 	}, {
 		name:         "folded spelling, one letter",
 		file:         "apiVersion: v1alpha1\nreservedCpus: \"0-3\"\n",
-		wantContains: []string{"reservedCpus", "reservedCPUs"},
+		wantContains: []string{`unknown field "reservedCpus"`},
 	}, {
-		// Without this the file reached the precedence pass, where the delete is
-		// by exact name, and overwrote the flag.
+		// Explicit flags must not make incorrectly cased file fields acceptable.
 		name:         "folded spelling against an explicit flag",
 		file:         "apiVersion: v1alpha1\nKubeconfig: \"2-3\"\n",
 		flags:        []string{"--kubeconfig=/from-cli"},
-		wantContains: []string{"Kubeconfig", "kubeconfig"},
+		wantContains: []string{`unknown field "Kubeconfig"`},
 	}, {
 		name:         "the same key twice",
 		file:         "apiVersion: v1alpha1\nreservedCPUs: \"0-1\"\nreservedCPUs: \"2-3\"\n",
@@ -179,11 +179,11 @@ func TestResolve_RejectsAmbiguousKeys(t *testing.T) {
 			dir := t.TempDir()
 			cfgFile := writeFile(t, dir, "config.yaml", tc.file)
 
-			var cfg driverconfig.Config
+			cliopts := driverconfig.DefaultCLIOptions()
 			sources := []driverconfig.Source{driverconfig.FromFile(cfgFile)}
 			if len(tc.flags) > 0 {
-				fs := newFlagSet(t, &cfg, tc.flags)
-				sources = append(sources, driverconfig.FromFlags(fs))
+				newFlagSet(t, &cliopts, tc.flags)
+				sources = append(sources, driverconfig.FromFlags(cliopts))
 			}
 
 			_, err := driverconfig.Resolve(testr.New(t), sources)
@@ -199,15 +199,8 @@ func TestResolve_RejectsAmbiguousKeys(t *testing.T) {
 	}
 }
 
-// TestResolve_ReportsEveryMiscasedKey: a hand-edited file usually has more than
-// one, and fixing them one restart at a time is the difference between one
-// CrashLoopBackOff and three. A key misspelled rather than miscased is not this
-// check's to batch, and the decoder reports those one at a time.
-//
-// Asserted as the whole string rather than key by key. Ranging a map named a
-// different key on each node for the same ConfigMap, so the keys are sorted, and
-// an exact message is what pins that ordering along with each canonical
-// spelling, the separator, and the shape of the whole thing.
+// TestResolve_ReportsEveryMiscasedKey checks that every key is reported in
+// deterministic order, independently of error separators and source wrapping.
 func TestResolve_ReportsEveryMiscasedKey(t *testing.T) {
 	dir := t.TempDir()
 	cfgFile := writeFile(t, dir, "config.yaml", `
@@ -222,16 +215,17 @@ cpudevicemode: individual
 	})
 
 	require.Error(t, err)
-	// we care about the inner error that the source reported, not about the
-	// wrapped error Resolve() produced.
-	err2 := errors.Unwrap(err)
-	if err2 == nil {
-		err2 = err
+	err2 := err
+	for cause := errors.Unwrap(err2); cause != nil; cause = errors.Unwrap(err2) {
+		err2 = cause
 	}
-	assert.EqualError(t, err2,
-		`field "cpudevicemode" is spelled differently from the schema; use "cpuDeviceMode"; `+
-			`field "groupby" is spelled differently from the schema; use "groupBy"; `+
-			`field "reservedcpus" is spelled differently from the schema; use "reservedCPUs"`)
+	message := err2.Error()
+	previous := -1
+	for _, key := range []string{"cpudevicemode", "groupby", "reservedcpus"} {
+		index := strings.Index(message, `"`+key+`"`)
+		require.Greater(t, index, previous, "all keys must appear in sorted order")
+		previous = index
+	}
 }
 
 // TestResolve_PartialFile: fields absent from the file retain their default values.
@@ -307,13 +301,13 @@ reservedCPUs: "0-3"
 hostnameOverride: from-file
 `)
 
-	cfg := driverconfig.Default()
+	cliopts := driverconfig.DefaultCLIOptions()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	// Mirror the real command line: --config and klog's --v live on the same
 	// FlagSet but are not Config fields.
 	fs.String("config", "", "path to the config file")
 	fs.Int("v", 0, "log verbosity")
-	cfg.AddFlags(fs)
+	cliopts.AddFlags(fs)
 	require.NoError(t, fs.Parse([]string{
 		"--config=" + cfgFile,
 		"--v=4",
@@ -327,7 +321,7 @@ hostnameOverride: from-file
 
 	got, err := driverconfig.Resolve(logger, []driverconfig.Source{
 		driverconfig.FromFile(cfgFile),
-		driverconfig.FromFlags(fs),
+		driverconfig.FromFlags(cliopts),
 	})
 
 	require.NoError(t, err)
@@ -348,6 +342,25 @@ func TestResolve_EmptyFilePath(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, driverconfig.Default(), result)
+}
+
+func TestFromV1Alpha1Overlay(t *testing.T) {
+	cfg := driverconfig.Default()
+	cfg.Kubeconfig = "/prior-config"
+	cfg.PublishNodeAllocatableResourceMapping = true
+	cfg.KubeletRootDir = "/custom/kubelet"
+
+	want := cfg
+	driverconfig.FromV1Alpha1(v1alpha1.Config{}, &cfg)
+	assert.Equal(t, want, cfg, "omitted fields must leave earlier values intact")
+
+	want.Kubeconfig = ""
+	want.PublishNodeAllocatableResourceMapping = false
+	driverconfig.FromV1Alpha1(v1alpha1.Config{
+		Kubeconfig:                            new(""),
+		PublishNodeAllocatableResourceMapping: new(false),
+	}, &cfg)
+	assert.Equal(t, want, cfg, "explicit zero values must override earlier values")
 }
 
 // TestDefault pins the built-in default values.
@@ -482,11 +495,11 @@ func TestResolve_KubeletRootDirFromFlag(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg driverconfig.Config
-			fs := newFlagSet(t, &cfg, tc.args)
+			cliopts := driverconfig.DefaultCLIOptions()
+			newFlagSet(t, &cliopts, tc.args)
 
 			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-				driverconfig.FromFlags(fs),
+				driverconfig.FromFlags(cliopts),
 			})
 
 			if tc.wantErr != "" {
@@ -500,13 +513,71 @@ func TestResolve_KubeletRootDirFromFlag(t *testing.T) {
 	}
 }
 
+func TestFromFlags_OnlyExplicitValuesOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "unset"},
+		{name: "explicit zero values", args: []string{"--kubeconfig=", "--expose-pcie-roots=false"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cliopts := driverconfig.DefaultCLIOptions()
+			newFlagSet(t, &cliopts, tc.args)
+			cfg := driverconfig.Default()
+			cfg.Kubeconfig = "/from-file"
+			cfg.ExposePCIeRoots = true
+			cfg.BindAddress = ":9090"
+			cfg.KubeletRootDir = "/custom/kubelet"
+
+			require.NoError(t, driverconfig.FromFlags(cliopts).Apply(testr.New(t), &cfg))
+			if len(tc.args) == 0 {
+				assert.Equal(t, "/from-file", cfg.Kubeconfig)
+				assert.True(t, cfg.ExposePCIeRoots)
+			} else {
+				assert.Empty(t, cfg.Kubeconfig)
+				assert.False(t, cfg.ExposePCIeRoots)
+			}
+			assert.Equal(t, ":9090", cfg.BindAddress)
+			assert.Equal(t, "/custom/kubelet", cfg.KubeletRootDir)
+		})
+	}
+}
+
+func TestCLIOptions_TracksSuccessfulParsing(t *testing.T) {
+	cliopts := driverconfig.DefaultCLIOptions()
+	fs := newFlagSet(t, &cliopts, []string{"--expose-pcie-roots", "--kubeconfig=/first", "--kubeconfig="})
+	assert.True(t, cliopts.ExposePCIeRoots.Set)
+	assert.True(t, cliopts.ExposePCIeRoots.Value)
+	assert.True(t, cliopts.Kubeconfig.Set)
+	assert.Empty(t, cliopts.Kubeconfig.Value)
+	assert.False(t, cliopts.BindAddress.Set)
+	assert.False(t, cliopts.KubeletRootDir.Set)
+	assert.Equal(t, driverconfig.DefaultBindAddress, cliopts.BindAddress.Value)
+	assert.Equal(t, driverconfig.DefaultKubeletRootDir, cliopts.KubeletRootDir.Value)
+
+	var help strings.Builder
+	fs.SetOutput(&help)
+	fs.PrintDefaults()
+	assert.NotContains(t, help.String(), "panic")
+	assert.Contains(t, help.String(), driverconfig.DefaultBindAddress)
+	assert.Contains(t, help.String(), driverconfig.DefaultKubeletRootDir)
+
+	cliopts = driverconfig.DefaultCLIOptions()
+	fs = flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(&strings.Builder{})
+	cliopts.AddFlags(fs)
+	require.Error(t, fs.Parse([]string{"--expose-pcie-roots=invalid"}))
+	assert.False(t, cliopts.ExposePCIeRoots.Set)
+}
+
 // TestFromFlags_BoolAndStringValues checks typed boolean and string overrides.
 func TestFromFlags_BoolAndStringValues(t *testing.T) {
 	for _, value := range []string{"true", "false"} {
 		t.Run(value, func(t *testing.T) {
-			cfg := driverconfig.Default()
-			fs := newFlagSet(t, &cfg, []string{"--expose-pcie-roots=" + value, "--kubeconfig=/from-cli"})
-			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{driverconfig.FromFlags(fs)})
+			cliopts := driverconfig.DefaultCLIOptions()
+			newFlagSet(t, &cliopts, []string{"--expose-pcie-roots=" + value, "--kubeconfig=/from-cli"})
+			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{driverconfig.FromFlags(cliopts)})
 			require.NoError(t, err)
 			assert.Equal(t, value == "true", result.ExposePCIeRoots)
 			assert.Equal(t, "/from-cli", result.Kubeconfig)
@@ -556,12 +627,12 @@ func TestResolve_KubeletRootDirWithAConfigFile(t *testing.T) {
 			dir := t.TempDir()
 			cfgFile := writeFile(t, dir, "config.yaml", "apiVersion: v1alpha1\n"+tc.content+"\n")
 
-			var cfg driverconfig.Config
-			fs := newFlagSet(t, &cfg, tc.args)
+			cliopts := driverconfig.DefaultCLIOptions()
+			newFlagSet(t, &cliopts, tc.args)
 
 			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
 				driverconfig.FromFile(cfgFile),
-				driverconfig.FromFlags(fs),
+				driverconfig.FromFlags(cliopts),
 			})
 
 			if len(tc.wantErrs) > 0 {
@@ -586,14 +657,14 @@ apiVersion: v1alpha1
 reservedCPUs: "0-3"
 `)
 
-	var cfg driverconfig.Config
-	fs := newFlagSet(t, &cfg, []string{
+	cliopts := driverconfig.DefaultCLIOptions()
+	newFlagSet(t, &cliopts, []string{
 		"--expose-pcie-roots=true",
 	})
 
 	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
 		driverconfig.FromFile(cfgFile),
-		driverconfig.FromFlags(fs),
+		driverconfig.FromFlags(cliopts),
 	})
 
 	require.NoError(t, err)
@@ -605,9 +676,9 @@ reservedCPUs: "0-3"
 func TestRemovedFlagsRejected(t *testing.T) {
 	for _, name := range []string{"cpu-device-mode", "group-by", "reserved-cpus", "hostname-override", "sysfs-overlay"} {
 		t.Run(name, func(t *testing.T) {
-			cfg := driverconfig.Default()
+			cliopts := driverconfig.DefaultCLIOptions()
 			fs := flag.NewFlagSet("test", flag.ContinueOnError)
-			cfg.AddFlags(fs)
+			cliopts.AddFlags(fs)
 			assert.Nil(t, fs.Lookup(name))
 			require.Error(t, fs.Parse([]string{"--" + name + "=value"}))
 		})
@@ -626,8 +697,8 @@ func TestWarnDeprecatedPCIeFlag(t *testing.T) {
 		{name: "false", args: []string{"--expose-pcie-roots=false"}, warn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := driverconfig.Default()
-			fs := newFlagSet(t, &cfg, tc.args)
+			cliopts := driverconfig.DefaultCLIOptions()
+			fs := newFlagSet(t, &cliopts, tc.args)
 			var logs strings.Builder
 			logger := funcr.New(func(prefix, args string) { logs.WriteString(prefix + args) }, funcr.Options{})
 			driverconfig.WarnDeprecatedFlags(fs, logger)

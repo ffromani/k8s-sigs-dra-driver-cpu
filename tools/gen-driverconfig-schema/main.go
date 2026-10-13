@@ -16,7 +16,7 @@ limitations under the License.
 
 // Command gen-driverconfig-schema regenerates
 // deployment/helm/dra-driver-cpu/driverconfig.schema.json from the
-// driverconfig.Config Go struct. Run via 'make driverconfig-schema'.
+// public v1alpha1.Config Go struct. Run via 'make driverconfig-schema'.
 package main
 
 import (
@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
+	"github.com/kubernetes-sigs/dra-driver-cpu/api/config/v1alpha1"
 )
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
 }
 
 func run(out string) error {
-	schema, err := driverconfig.GenerateDriverConfigSchema()
+	schema, err := v1alpha1.GenerateDriverConfigSchema()
 	if err != nil {
 		return fmt.Errorf("generating schema: %w", err)
 	}

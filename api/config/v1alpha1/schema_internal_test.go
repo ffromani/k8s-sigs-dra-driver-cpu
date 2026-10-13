@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Internal package test: has direct access to the unexported schema metadata.
-package driverconfig
+package v1alpha1
 
 import (
 	"encoding/json"
@@ -25,8 +25,7 @@ import (
 )
 
 // TestGenerateDriverConfigSchema_CoversAllFields: every Config json field is
-// either excluded on purpose (schemaExcludedFields) or present in the
-// generated schema's properties.
+// present in the generated schema's properties.
 func TestGenerateDriverConfigSchema_CoversAllFields(t *testing.T) {
 	out, err := GenerateDriverConfigSchema()
 	if err != nil {
@@ -47,12 +46,6 @@ func TestGenerateDriverConfigSchema_CoversAllFields(t *testing.T) {
 			continue
 		}
 		_, present := doc.Properties[jsonName]
-		if _, excluded := schemaExcludedFields[jsonName]; excluded {
-			if present {
-				t.Errorf("Config field %q (json key %q) is marked excluded but appears in the generated schema", field.Name, jsonName)
-			}
-			continue
-		}
 		if !present {
 			t.Errorf("Config field %q (json key %q) is missing from the generated schema", field.Name, jsonName)
 		}
@@ -73,11 +66,7 @@ func TestGenerateDriverConfigSchema_CoversAllFields(t *testing.T) {
 // and this fails at build time the moment Config grows a shape it does not
 // cover.
 func TestConfigDeclaresExplicitJSONNames(t *testing.T) {
-	// Seeded rather than empty: apiVersion is not a Config field, so nothing in
-	// the loop would collide with it, but buildConfMap reads and strips it before
-	// the decoder runs. A field claiming that name would pass every check here
-	// and then never be settable from a file at all.
-	byName := map[string]string{"apiVersion": "the schema property buildConfMap strips"}
+	byName := map[string]string{}
 	for field := range reflect.TypeFor[Config]().Fields() {
 		if field.Anonymous {
 			t.Errorf("field %q is embedded; canonicalConfigKeys reads direct fields only, "+
@@ -118,7 +107,7 @@ func TestConfigDeclaresExplicitJSONNames(t *testing.T) {
 
 // The chart owns the kubelet root, since its hostPath mounts render from the
 // same value, so it stays out of the schema like bindAddress and exposePCIeRoots.
-func TestGenerateDriverConfigSchema_ExcludesKubeletRootDir(t *testing.T) {
+func TestGenerateDriverConfigSchema_ExcludesCLIOnlyFields(t *testing.T) {
 	out, err := GenerateDriverConfigSchema()
 	if err != nil {
 		t.Fatalf("GenerateDriverConfigSchema: %v", err)
@@ -131,10 +120,9 @@ func TestGenerateDriverConfigSchema_ExcludesKubeletRootDir(t *testing.T) {
 		t.Fatalf("unmarshal generated schema: %v\n%s", err, out)
 	}
 
-	if _, ok := schema.Properties["kubeletRootDir"]; ok {
-		t.Errorf("kubeletRootDir must not appear in the generated schema; got:\n%s", out)
-	}
-	if want := "use the chart's top-level kubeletRootDir value, or --kubelet-root-dir when running the binary directly"; schemaExcludedFields["kubeletRootDir"] != want {
-		t.Errorf("kubeletRootDir exclusion hint = %q, want %q", schemaExcludedFields["kubeletRootDir"], want)
+	for _, name := range []string{"bindAddress", "exposePCIeRoots", "kubeletRootDir"} {
+		if _, ok := schema.Properties[name]; ok {
+			t.Errorf("%s must not appear in the generated schema; got:\n%s", name, out)
+		}
 	}
 }

@@ -25,10 +25,37 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/gatherinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 	"sigs.k8s.io/yaml"
 )
+
+func TestReportDriverConfigSerialization(t *testing.T) {
+	data, err := yaml.Marshal(gatherinfo.Report{
+		DriverConfig: driverconfig.ToV1Alpha1(driverconfig.Config{
+			CPUDeviceMode:                         "grouped",
+			PublishNodeAllocatableResourceMapping: true,
+			BindAddress:                           ":9090",
+			KubeletRootDir:                        "/custom/kubelet",
+			ExposePCIeRoots:                       true,
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := yaml.Unmarshal(data, &report); err != nil {
+		t.Fatal(err)
+	}
+	config, ok := report["driverConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected driverConfig: %#v", report["driverConfig"])
+	}
+	if len(config) != 9 || config["apiVersion"] != "v1alpha1" || config["kubeconfig"] != "" || config["allocator"] != "" || config["cpuDeviceMode"] != "grouped" || config["publishNodeAllocatableResourceMapping"] != true {
+		t.Fatalf("expected resolved public fields including zero values, without CLI-only fields, got %#v", config)
+	}
+}
 
 func TestRunWritesReportFile(t *testing.T) {
 	hostRoot := setupFakeHost(t, []byte("/dracpu\x00--config=/config.yaml\x00--v=4\x00--logging-format=json\x00"))
@@ -59,17 +86,29 @@ func TestRunWritesReportFile(t *testing.T) {
 	report := readReport(t, data)
 	assertCommonReport(t, report)
 
-	if report.DriverConfig.ReservedCPUs != "4-7" {
-		t.Fatalf("reservedCPUs = %q, want 4-7", report.DriverConfig.ReservedCPUs)
+	if report.DriverConfig.ReservedCPUs == nil {
+		t.Fatal("missing ReservedCPUs in driverConfig")
 	}
-	if report.DriverConfig.CPUDeviceMode != device.CPU_DEVICE_MODE_INDIVIDUAL {
-		t.Fatalf("cpuDeviceMode = %q, want %q", report.DriverConfig.CPUDeviceMode, device.CPU_DEVICE_MODE_INDIVIDUAL)
+	if *report.DriverConfig.ReservedCPUs != "4-7" {
+		t.Fatalf("reservedCPUs = %q, want 4-7", *report.DriverConfig.ReservedCPUs)
 	}
-	if report.DriverConfig.GroupBy != device.GROUP_BY_SOCKET {
-		t.Fatalf("groupBy = %q, want %q", report.DriverConfig.GroupBy, device.GROUP_BY_SOCKET)
+	if report.DriverConfig.CPUDeviceMode == nil {
+		t.Fatal("missing CPUDeviceMode in driverConfig")
 	}
-	if report.DriverConfig.HostnameOverride != "node-a" {
-		t.Fatalf("hostnameOverride = %q, want node-a", report.DriverConfig.HostnameOverride)
+	if *report.DriverConfig.CPUDeviceMode != device.CPU_DEVICE_MODE_INDIVIDUAL {
+		t.Fatalf("cpuDeviceMode = %q, want %q", *report.DriverConfig.CPUDeviceMode, device.CPU_DEVICE_MODE_INDIVIDUAL)
+	}
+	if report.DriverConfig.GroupBy == nil {
+		t.Fatal("missing GroupBy in driverConfig")
+	}
+	if *report.DriverConfig.GroupBy != device.GROUP_BY_SOCKET {
+		t.Fatalf("groupBy = %q, want %q", *report.DriverConfig.GroupBy, device.GROUP_BY_SOCKET)
+	}
+	if report.DriverConfig.HostnameOverride == nil {
+		t.Fatal("missing HostnameOverride in driverConfig")
+	}
+	if *report.DriverConfig.HostnameOverride != "node-a" {
+		t.Fatalf("hostnameOverride = %q, want node-a", *report.DriverConfig.HostnameOverride)
 	}
 }
 
@@ -86,8 +125,11 @@ func TestRunWritesReportToStdout(t *testing.T) {
 
 	report := readReport(t, []byte(stdout))
 	assertCommonReport(t, report)
-	if report.DriverConfig.GroupBy != device.GROUP_BY_SOCKET {
-		t.Fatalf("groupBy = %q, want %q", report.DriverConfig.GroupBy, device.GROUP_BY_SOCKET)
+	if report.DriverConfig.GroupBy == nil {
+		t.Fatal("missing GroupBy in driverConfig")
+	}
+	if *report.DriverConfig.GroupBy != device.GROUP_BY_SOCKET {
+		t.Fatalf("groupBy = %q, want %q", *report.DriverConfig.GroupBy, device.GROUP_BY_SOCKET)
 	}
 }
 
@@ -112,7 +154,10 @@ func TestRunAppliesDriverSysFSOverlay(t *testing.T) {
 	}
 
 	report := readReport(t, []byte(stdout))
-	if got := report.DriverConfig.SysFSOverlay; got != overlayPath {
+	if report.DriverConfig.SysFSOverlay == nil {
+		t.Fatal("missing sysfsOverlay in driverConfig")
+	}
+	if got := *report.DriverConfig.SysFSOverlay; got != overlayPath {
 		t.Fatalf("sysfsOverlay = %q, want %q", got, overlayPath)
 	}
 	if !report.CPUDetails.Topology.SMTEnabled {
@@ -151,7 +196,10 @@ func TestRunAppliesDriverSysFSOverlayFromParentRelativePath(t *testing.T) {
 	}
 
 	report := readReport(t, []byte(stdout))
-	if got := report.DriverConfig.SysFSOverlay; got != overlayPath {
+	if report.DriverConfig.SysFSOverlay == nil {
+		t.Fatal("missing sysfsOverlay in driverConfig")
+	}
+	if got := *report.DriverConfig.SysFSOverlay; got != overlayPath {
 		t.Fatalf("sysfsOverlay = %q, want %q", got, overlayPath)
 	}
 	if got := report.CPUDetails.CPUs[0].SocketID; got != 7 {
@@ -192,8 +240,11 @@ func TestRunReadsConfigFile(t *testing.T) {
 	}
 
 	report := readReport(t, []byte(stdout))
-	if report.DriverConfig.ReservedCPUs != "2-3" {
-		t.Fatalf("reservedCPUs = %q, want 2-3 (from config file)", report.DriverConfig.ReservedCPUs)
+	if report.DriverConfig.ReservedCPUs == nil {
+		t.Fatal("missing ReservedCPUs in driverConfig")
+	}
+	if *report.DriverConfig.ReservedCPUs != "2-3" {
+		t.Fatalf("reservedCPUs = %q, want 2-3 (from config file)", *report.DriverConfig.ReservedCPUs)
 	}
 }
 

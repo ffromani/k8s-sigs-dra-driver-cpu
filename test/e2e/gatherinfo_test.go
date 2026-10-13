@@ -64,7 +64,9 @@ var _ = ginkgo.Describe("dracpu-gatherinfo", ginkgo.Ordered, func() {
 					"dracpu-gatherinfo output from pod %q should include the report layout version", pod.Name)
 				gomega.Expect(report.CPUDetails.CPUs).NotTo(gomega.BeEmpty(),
 					"dracpu-gatherinfo output from pod %q should include CPU details", pod.Name)
-				gomega.Expect(report.DriverConfig.CPUDeviceMode).NotTo(gomega.BeEmpty(),
+				gomega.Expect(report.DriverConfig.CPUDeviceMode).NotTo(gomega.BeNil(),
+					"dracpu-gatherinfo output from pod %q should include detected driver config", pod.Name)
+				gomega.Expect(*report.DriverConfig.CPUDeviceMode).NotTo(gomega.BeEmpty(),
 					"dracpu-gatherinfo output from pod %q should include detected driver config", pod.Name)
 			}
 		})

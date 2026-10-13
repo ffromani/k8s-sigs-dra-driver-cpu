@@ -22,29 +22,26 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// ConfigAPIVersion is the version validated in config files.
-const ConfigAPIVersion = "v1alpha1"
-
-// Config holds the driver runtime configuration.
+// Config holds the internal driver runtime configuration.
 type Config struct {
-	Kubeconfig       string `json:"kubeconfig,omitempty"`
-	HostnameOverride string `json:"hostnameOverride,omitempty"`
-	BindAddress      string `json:"bindAddress,omitempty"`
-	ReservedCPUs     string `json:"reservedCPUs,omitempty"`
-	CPUDeviceMode    string `json:"cpuDeviceMode,omitempty"`
-	GroupBy          string `json:"groupBy,omitempty"`
-	ExposePCIeRoots  bool   `json:"exposePCIeRoots,omitempty"`
-	SysFSOverlay     string `json:"sysfsOverlay,omitempty"`
+	Kubeconfig       string
+	HostnameOverride string
+	BindAddress      string
+	ReservedCPUs     string
+	CPUDeviceMode    string
+	GroupBy          string
+	ExposePCIeRoots  bool
+	SysFSOverlay     string
 	// KubeletRootDir is the kubelet root directory. The plugin registration and
 	// plugins directories are derived from it as <root>/plugins_registry and
 	// <root>/plugins. Set it when the kubelet --root-dir is not the default
 	// /var/lib/kubelet.
-	KubeletRootDir string `json:"kubeletRootDir,omitempty"`
+	KubeletRootDir string
 	// PublishNodeAllocatableResourceMapping publishes KEP-5517 nodeAllocatableResources
 	// mappings in ResourceSlice devices. Requires the DRANodeAllocatableResources
 	// feature gate in the cluster. Defaults to false.
-	PublishNodeAllocatableResourceMapping bool   `json:"publishNodeAllocatableResourceMapping,omitempty"`
-	Allocator                             string `json:"allocator,omitempty"`
+	PublishNodeAllocatableResourceMapping bool
+	Allocator                             string
 }
 
 // LogValues returns key-value pairs for structured logging of the config.
@@ -64,8 +61,8 @@ func (c Config) LogValues() []any {
 	}
 }
 
-// dumpConfig mirrors Config field-for-field but drops the omitempty json
-// tags, so Dump also prints zero values (e.g. exposePCIeRoots=false).
+// dumpConfig names diagnostic fields and includes zero values. It is not a
+// public configuration schema.
 type dumpConfig struct {
 	Kubeconfig                            string `json:"kubeconfig"`
 	HostnameOverride                      string `json:"hostnameOverride"`
@@ -81,8 +78,7 @@ type dumpConfig struct {
 }
 
 // Dump renders the Config as YAML, for logging a human-readable snapshot of
-// the fully loaded configuration. Zero values are included, unlike
-// marshalling Config directly, since they reflect real runtime state.
+// the fully loaded internal configuration, including zero values.
 func (c Config) Dump() string {
 	out, err := yaml.Marshal(dumpConfig(c))
 	if err != nil {

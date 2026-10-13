@@ -16,26 +16,20 @@ limitations under the License.
 
 package driverconfig
 
-import (
-	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/cpuallocator"
-	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
-)
+import "github.com/kubernetes-sigs/dra-driver-cpu/api/config/v1alpha1"
 
+// CLI-only deployment defaults are independent of the public file schema.
 const (
-	// DefaultKubeletRootDir is the standard kubelet root directory, so behaviour is
-	// unchanged unless the kubelet --root-dir is relocated.
 	DefaultKubeletRootDir = "/var/lib/kubelet"
-
-	DefaultBindAddress = ":8080"
+	DefaultBindAddress    = ":8080"
 )
 
-// Default returns a Config with built-in default values.
+// Default resolves an empty configuration of the current public version.
 func Default() Config {
-	return Config{
+	cfg := Config{
 		BindAddress:    DefaultBindAddress,
-		CPUDeviceMode:  device.CPU_DEVICE_MODE_GROUPED,
-		GroupBy:        device.GROUP_BY_NUMA_NODE,
 		KubeletRootDir: DefaultKubeletRootDir,
-		Allocator:      cpuallocator.ModeCPUManager,
 	}
+	FromV1Alpha1(v1alpha1.Default(), &cfg)
+	return cfg
 }

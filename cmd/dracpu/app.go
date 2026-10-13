@@ -55,7 +55,7 @@ const (
 )
 
 var (
-	driverFlags driverconfig.Config
+	driverFlags driverconfig.CLIOptions
 	configFile  string
 
 	ready atomic.Bool
@@ -115,7 +115,7 @@ func main() {
 		// Per our current policy, the priority (rightmost wins)
 		// is defaults -> config -> flags.
 		driverconfig.FromFile(configFile),
-		driverconfig.FromFlags(flag.CommandLine),
+		driverconfig.FromFlags(driverFlags),
 	})
 	if err != nil {
 		logger.Error(err, "failed to load configuration")
