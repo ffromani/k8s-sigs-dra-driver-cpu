@@ -24,7 +24,7 @@
           ]
         },
         "exposePCIeRoots": {
-          "description": "**Deprecated:** use `driverConfig.exposePCIeRoots` instead. Discover and expose PCIe roots as device attributes. Requires the `DRAListTypeAttributes=true` feature gate in the cluster.",
+          "description": "Discover and expose PCIe roots as device attributes. Requires the `DRAListTypeAttributes=true` feature gate in the cluster. **Deprecated:** a replacement through versioned configuration is planned. Until then, keep using `args.exposePCIeRoots`; the current `driverConfig` schema does not support this setting.",
           "type": "boolean"
         },
         "groupBy": {
