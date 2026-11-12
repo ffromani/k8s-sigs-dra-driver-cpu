@@ -22,25 +22,33 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// flagToJSONKey maps CLI flag names to their Config JSON keys.
+// Add an entry here whenever a new field is added to Config and AddFlags.
+var flagToJSONKey = map[string]string{
+	"kubeconfig":        "kubeconfig",
+	"bind-address":      "bindAddress",
+	"expose-pcie-roots": "exposePCIeRoots",
+	"kubelet-root-dir":  "kubeletRootDir",
+}
+
 type FlagSource struct {
-	overrides map[string]any
+	flagset         *flag.FlagSet
+	kubeConfig      string
+	bindAddress     string
+	kubeletRootDir  string
+	exposePCIeRoots bool
 }
 
 func FromFlags(flagset *flag.FlagSet) FlagSource {
 	fs := FlagSource{
-		overrides: make(map[string]any),
+		flagset:        flagset,
+		bindAddress:    DefaultBindAddress,
+		kubeletRootDir: DefaultKubeletRootDir,
 	}
-	flagset.Visit(func(f *flag.Flag) {
-		key, ok := flagToJSONKey[f.Name]
-		if !ok {
-			return
-		}
-		if g, ok := f.Value.(flag.Getter); ok {
-			fs.overrides[key] = g.Get()
-		} else {
-			fs.overrides[key] = f.Value.String()
-		}
-	})
+	flagset.StringVar(&fs.kubeConfig, "kubeconfig", fs.kubeConfig, "absolute path to the kubeconfig file")
+	flagset.StringVar(&fs.bindAddress, "bind-address", fs.bindAddress, "The address to bind the HTTP server for /healthz and /metrics endpoints")
+	flagset.BoolVar(&fs.exposePCIeRoots, "expose-pcie-roots", fs.exposePCIeRoots, "Discover and expose PCIe roots as device attributes. Requires the DRAListTypeAttributes=true Feature Gate in the cluster.")
+	flagset.StringVar(&fs.kubeletRootDir, "kubelet-root-dir", fs.kubeletRootDir, "The kubelet root directory. The plugin registration and plugin data directories are derived from it as <root>/plugins_registry and <root>/plugins/<driver-name>. The Helm chart supplies this together with the matching hostPath mounts; set it only if the kubelet --root-dir is not the default /var/lib/kubelet.")
 	return fs
 }
 
@@ -49,26 +57,18 @@ func (fs FlagSource) Name() string {
 }
 
 func (fs FlagSource) Apply(logger logr.Logger, cfg *Config) error {
-	logger.V(6).Info("overrides", "stage", fs.Name(), "values", fs.overrides)
-	return applyMap(cfg, fs.overrides)
-}
-
-// AddFlags registers the Config fields that are exposed as CLI flags on fs.
-func (c *Config) AddFlags(fs *flag.FlagSet) {
-	c.applyDefaults()
-
-	fs.StringVar(&c.Kubeconfig, "kubeconfig", c.Kubeconfig, "absolute path to the kubeconfig file")
-	fs.StringVar(&c.BindAddress, "bind-address", c.BindAddress, "The address to bind the HTTP server for /healthz and /metrics endpoints")
-	fs.BoolVar(&c.ExposePCIeRoots, "expose-pcie-roots", c.ExposePCIeRoots, "Discover and expose PCIe roots as device attributes. Requires the DRAListTypeAttributes=true Feature Gate in the cluster.")
-	fs.StringVar(&c.KubeletRootDir, "kubelet-root-dir", c.KubeletRootDir, "The kubelet root directory. The plugin registration and plugin data directories are derived from it as <root>/plugins_registry and <root>/plugins/<driver-name>. The Helm chart supplies this together with the matching hostPath mounts; set it only if the kubelet --root-dir is not the default /var/lib/kubelet.")
-}
-
-func (c *Config) applyDefaults() {
-	defaults := Default()
-	if c.BindAddress == "" {
-		c.BindAddress = defaults.BindAddress
-	}
-	if c.KubeletRootDir == "" {
-		c.KubeletRootDir = defaults.KubeletRootDir
-	}
+	overrides := make(map[string]any)
+	fs.flagset.Visit(func(f *flag.Flag) {
+		key, ok := flagToJSONKey[f.Name]
+		if !ok {
+			return
+		}
+		if g, ok := f.Value.(flag.Getter); ok {
+			overrides[key] = g.Get()
+		} else {
+			overrides[key] = f.Value.String()
+		}
+	})
+	logger.V(6).Info("overrides", "stage", fs.Name(), "values", overrides)
+	return applyMap(cfg, overrides)
 }

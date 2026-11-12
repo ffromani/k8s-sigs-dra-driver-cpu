@@ -154,7 +154,9 @@ func createOutputFile(parentDir string, now time.Time, pid int) (*os.File, strin
 
 func collectReport(logger logr.Logger, driverCmdlinePath string) (gatherinfoapi.Report, error) {
 	driverConfig, err := driverconfig.Resolve(logger, []driverconfig.Source{
-		ConfigSource{DriverCmdlinePath: driverCmdlinePath},
+		ConfigSource{
+			DriverCmdlinePath: driverCmdlinePath,
+		},
 	})
 	if err != nil {
 		return gatherinfoapi.Report{}, fmt.Errorf("failed to resolve driver config: %w", err)
@@ -278,10 +280,9 @@ func (cs ConfigSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error
 		return nil
 	}
 
-	var conf driverconfig.Config // storage space for flag values
 	fs := flag.NewFlagSet("detect-driver-config", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	conf.AddFlags(fs)
+	confSrc := driverconfig.FromFlags(fs)
 	var configFile string
 	fs.StringVar(&configFile, "config", "", "")
 	if err := fs.Parse(knownConfigArgs(fs, cmdline[1:])); err != nil {
@@ -297,7 +298,7 @@ func (cs ConfigSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error
 	}
 
 	// flags applied last so they win over file values
-	_ = driverconfig.FromFlags(fs).Apply(logger, cfg)
+	_ = confSrc.Apply(logger, cfg)
 	return nil
 }
 

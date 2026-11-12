@@ -25,15 +25,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// flagToJSONKey maps CLI flag names to their Config JSON keys.
-// Add an entry here whenever a new field is added to Config and AddFlags.
-var flagToJSONKey = map[string]string{
-	"kubeconfig":        "kubeconfig",
-	"bind-address":      "bindAddress",
-	"expose-pcie-roots": "exposePCIeRoots",
-	"kubelet-root-dir":  "kubeletRootDir",
-}
-
 type Source interface {
 	Name() string
 	Apply(logger logr.Logger, cfg *Config) error

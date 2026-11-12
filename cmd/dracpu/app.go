@@ -55,8 +55,7 @@ const (
 )
 
 var (
-	driverFlags driverconfig.Config
-	configFile  string
+	configFile string
 
 	ready atomic.Bool
 )
@@ -65,7 +64,6 @@ func init() {
 	// --config is kept outside Config to avoid a self-referential loop,
 	// following the convention used by kubeadm and similar tools.
 	flag.StringVar(&configFile, "config", "", configFlagHelp)
-	driverFlags.AddFlags(flag.CommandLine)
 	flag.CommandLine.Usage = func() {
 		printRootUsage(flag.CommandLine)
 	}
@@ -86,6 +84,7 @@ func main() {
 		os.Args = append([]string{"dracpu", "gatherinfo"}, os.Args[1:]...)
 	}
 
+	flagSrc := driverconfig.FromFlags(flag.CommandLine)
 	ctxlog.AddFlags(flag.CommandLine)
 	flag.Parse()
 	logger := ctxlog.Setup()
@@ -114,7 +113,7 @@ func main() {
 		// Per our current policy, the priority (rightmost wins)
 		// is defaults -> config -> flags.
 		driverconfig.FromFile(configFile),
-		driverconfig.FromFlags(flag.CommandLine),
+		flagSrc,
 	})
 	if err != nil {
 		logger.Error(err, "failed to load configuration")

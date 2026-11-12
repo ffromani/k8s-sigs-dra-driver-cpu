@@ -24,9 +24,8 @@ import (
 
 // TestFlagToJSONKey_CoversAllFlags: every AddFlags flag has a flagToJSONKey entry.
 func TestFlagToJSONKey_CoversAllFlags(t *testing.T) {
-	cfg := Config{}
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	cfg.AddFlags(fs)
+	FromFlags(fs)
 
 	fs.VisitAll(func(f *flag.Flag) {
 		if _, ok := flagToJSONKey[f.Name]; !ok {
@@ -37,9 +36,8 @@ func TestFlagToJSONKey_CoversAllFlags(t *testing.T) {
 
 // TestFlagToJSONKey_NoStaleEntries: every flagToJSONKey entry maps to a real flag.
 func TestFlagToJSONKey_NoStaleEntries(t *testing.T) {
-	cfg := Config{}
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	cfg.AddFlags(fs)
+	FromFlags(fs)
 
 	for flagName := range flagToJSONKey {
 		if fs.Lookup(flagName) == nil {

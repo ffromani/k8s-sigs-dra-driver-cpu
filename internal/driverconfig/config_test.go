@@ -36,12 +36,12 @@ import (
 )
 
 // newFlagSet creates a FlagSet with cfg registered and args parsed.
-func newFlagSet(t *testing.T, cfg *driverconfig.Config, args []string) *flag.FlagSet {
+func newFlagSet(t *testing.T, args []string) (*flag.FlagSet, driverconfig.Source) {
 	t.Helper()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	cfg.AddFlags(fs)
+	src := driverconfig.FromFlags(fs)
 	require.NoError(t, fs.Parse(args))
-	return fs
+	return fs, src
 }
 
 // writeFile creates name with content inside dir and returns the full path.
@@ -93,14 +93,13 @@ reservedCPUs: "0-3"
 kubeconfig: /from/file
 `)
 
-	var cfg driverconfig.Config
-	fs := newFlagSet(t, &cfg, []string{
+	_, src := newFlagSet(t, []string{
 		"--kubeconfig=/from/flag",
 	})
 
 	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
 		driverconfig.FromFile(cfgFile),
-		driverconfig.FromFlags(fs),
+		src,
 	})
 
 	require.NoError(t, err)
@@ -182,11 +181,10 @@ func TestResolve_RejectsAmbiguousKeys(t *testing.T) {
 			dir := t.TempDir()
 			cfgFile := writeFile(t, dir, "config.yaml", tc.file)
 
-			var cfg driverconfig.Config
 			sources := []driverconfig.Source{driverconfig.FromFile(cfgFile)}
 			if len(tc.flags) > 0 {
-				fs := newFlagSet(t, &cfg, tc.flags)
-				sources = append(sources, driverconfig.FromFlags(fs))
+				_, src := newFlagSet(t, tc.flags)
+				sources = append(sources, src)
 			}
 
 			_, err := driverconfig.Resolve(testr.New(t), sources)
@@ -311,13 +309,12 @@ hostnameOverride: from-file
 kubeconfig: /from/file
 `)
 
-	cfg := driverconfig.Default()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	// Mirror the real command line: --config and klog's --v live on the same
 	// FlagSet but are not Config fields.
 	fs.String("config", "", "path to the config file")
 	fs.Int("v", 0, "log verbosity")
-	cfg.AddFlags(fs)
+	src := driverconfig.FromFlags(fs)
 	require.NoError(t, fs.Parse([]string{
 		"--config=" + cfgFile,
 		"--v=4",
@@ -331,7 +328,7 @@ kubeconfig: /from/file
 
 	got, err := driverconfig.Resolve(logger, []driverconfig.Source{
 		driverconfig.FromFile(cfgFile),
-		driverconfig.FromFlags(fs),
+		src,
 	})
 
 	require.NoError(t, err)
@@ -354,10 +351,9 @@ func TestRemovedFlags_AreRejected(t *testing.T) {
 		"sysfs-overlay",
 	} {
 		t.Run(name, func(t *testing.T) {
-			var cfg driverconfig.Config
 			fs := flag.NewFlagSet("test", flag.ContinueOnError)
 			fs.SetOutput(io.Discard)
-			cfg.AddFlags(fs)
+			_ = driverconfig.FromFlags(fs)
 
 			assert.Nil(t, fs.Lookup(name))
 			assert.Error(t, fs.Parse([]string{"--" + name + "=x"}))
@@ -507,11 +503,10 @@ func TestResolve_KubeletRootDirFromFlag(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg driverconfig.Config
-			fs := newFlagSet(t, &cfg, tc.args)
+			_, src := newFlagSet(t, tc.args)
 
 			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-				driverconfig.FromFlags(fs),
+				src,
 			})
 
 			if tc.wantErr != "" {
@@ -550,10 +545,8 @@ func TestFromFlags_BoolAndStringValues(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := driverconfig.Default()
-			fs := newFlagSet(t, &cfg, tc.args)
+			_, src := newFlagSet(t, tc.args)
 
-			src := driverconfig.FromFlags(fs)
 			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{src})
 
 			require.NoError(t, err)
@@ -605,12 +598,11 @@ func TestResolve_KubeletRootDirWithAConfigFile(t *testing.T) {
 			dir := t.TempDir()
 			cfgFile := writeFile(t, dir, "config.yaml", "apiVersion: v1alpha1\n"+tc.content+"\n")
 
-			var cfg driverconfig.Config
-			fs := newFlagSet(t, &cfg, tc.args)
+			_, src := newFlagSet(t, tc.args)
 
 			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
 				driverconfig.FromFile(cfgFile),
-				driverconfig.FromFlags(fs),
+				src,
 			})
 
 			if len(tc.wantErrs) > 0 {
@@ -635,14 +627,13 @@ apiVersion: v1alpha1
 reservedCPUs: "0-3"
 `)
 
-	var cfg driverconfig.Config
-	fs := newFlagSet(t, &cfg, []string{
+	_, src := newFlagSet(t, []string{
 		"--expose-pcie-roots=true",
 	})
 
 	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
 		driverconfig.FromFile(cfgFile),
-		driverconfig.FromFlags(fs),
+		src,
 	})
 
 	require.NoError(t, err)
