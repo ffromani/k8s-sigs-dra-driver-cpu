@@ -92,6 +92,54 @@ var _ = ginkgo.DescribeTable("[Local] dracpu command flag isolation",
 		"flag provided but not defined: -show-metrics"),
 )
 
+type startupConfigLoggingCase struct {
+	args            []string
+	kubeconfig      string
+	kubeletRoot     string
+	exposePCIeRoots bool
+}
+
+var _ = ginkgo.DescribeTable("[Local] dracpu startup configuration logging",
+	func(tc startupConfigLoggingCase) {
+		// Stop before driver setup so the test needs neither a cluster nor a listening socket.
+		cmdline := append([]string{binPath, "--bind-address=missing-port"}, tc.args...)
+		// #nosec G204 -- the command and arguments come from the fixed test table below.
+		out, err := exec.Command(cmdline[0], cmdline[1:]...).CombinedOutput()
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(string(out)).To(gomega.ContainSubstring("failed to bind HTTP server to missing-port"))
+
+		var snapshots []string
+		for line := range strings.SplitSeq(string(out), "\n") {
+			if strings.Contains(line, `"configuration successfully loaded"`) {
+				snapshots = append(snapshots, line)
+			}
+		}
+		gomega.Expect(snapshots).To(gomega.HaveLen(1), "output: %s", out)
+		for _, field := range []string{
+			fmt.Sprintf("kubeconfig=%q", tc.kubeconfig),
+			`hostnameOverride=""`, `bindAddress="missing-port"`, `reservedCPUs=""`,
+			`cpuDeviceMode="grouped"`, `groupBy="numanode"`,
+			fmt.Sprintf("exposePCIeRoots=%t", tc.exposePCIeRoots),
+			`sysfsOverlay=""`, fmt.Sprintf("kubeletRootDir=%q", tc.kubeletRoot),
+			`publishNodeAllocatableResourceMapping=false`, `allocator="cpumanager"`,
+		} {
+			gomega.Expect(snapshots[0]).To(gomega.ContainSubstring(field))
+		}
+	},
+	ginkgo.Entry("defaults", startupConfigLoggingCase{
+		args:            nil,
+		kubeconfig:      "",
+		kubeletRoot:     "/var/lib/kubelet",
+		exposePCIeRoots: false,
+	}),
+	ginkgo.Entry("explicit CLI settings", startupConfigLoggingCase{
+		args:            []string{"--kubeconfig=/client/config", "--kubelet-root-dir=/custom/kubelet", "--expose-pcie-roots=true"},
+		kubeconfig:      "/client/config",
+		kubeletRoot:     "/custom/kubelet",
+		exposePCIeRoots: true,
+	}),
+)
+
 func findDescriptorByName(descriptors []metrics.Descriptor, name string) *metrics.Descriptor {
 	for idx := range len(descriptors) {
 		desc := &descriptors[idx]
