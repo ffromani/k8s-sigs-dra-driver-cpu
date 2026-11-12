@@ -31,6 +31,7 @@ import (
 
 	"github.com/go-logr/logr"
 	dracpuapi "github.com/kubernetes-sigs/dra-driver-cpu/api"
+	apiconfig "github.com/kubernetes-sigs/dra-driver-cpu/api/driverconfig"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/buildinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/ctxlog"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
@@ -125,7 +126,7 @@ func main() {
 	}
 }
 
-func runDriver(logger logr.Logger, cfg driverconfig.Config) error {
+func runDriver(logger logr.Logger, cfg apiconfig.Config) error {
 	if err := run(logger, cfg); err != nil {
 		logger.Error(err, "failed to run")
 		return err
@@ -133,7 +134,7 @@ func runDriver(logger logr.Logger, cfg driverconfig.Config) error {
 	return nil
 }
 
-func run(logger logr.Logger, cfg driverconfig.Config) error {
+func run(logger logr.Logger, cfg apiconfig.Config) error {
 	printVersion(logger)
 	logger.Info("configuration successfully loaded", cfg.LogValues()...)
 
@@ -177,9 +178,10 @@ func run(logger logr.Logger, cfg driverconfig.Config) error {
 		}
 	}()
 
+	kubeConfig := cfg.Kubeconfig
 	var restConfig *rest.Config
-	if cfg.Kubeconfig != "" {
-		restConfig, err = clientcmd.BuildConfigFromFlags("", cfg.Kubeconfig)
+	if kubeConfig != "" {
+		restConfig, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
 	} else {
 		// creates the in-cluster config
 		restConfig, err = rest.InClusterConfig()

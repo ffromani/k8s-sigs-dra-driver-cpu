@@ -7,3 +7,10 @@ const (
 
 	DefaultBindAddress = ":8080"
 )
+
+func Default() Config {
+	return Config{
+		KubeletRootDir: DefaultKubeletRootDir,
+		BindAddress:    DefaultBindAddress,
+	}
+}

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apiconfig "github.com/kubernetes-sigs/dra-driver-cpu/api/driverconfig"
 	gatherinfoapi "github.com/kubernetes-sigs/dra-driver-cpu/api/gatherinfo/v1"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/buildinfo"
 	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
@@ -193,7 +194,7 @@ func collectReport(logger logr.Logger, driverCmdlinePath string) (gatherinfoapi.
 }
 
 // makeDriverConfigSnapshot maps runtime settings to the fixed v1 report schema.
-func makeDriverConfigSnapshot(cfg driverconfig.Config) gatherinfoapi.DriverConfig {
+func makeDriverConfigSnapshot(cfg apiconfig.Config) gatherinfoapi.DriverConfig {
 	return gatherinfoapi.DriverConfig{
 		Kubeconfig:                            cfg.Kubeconfig,
 		HostnameOverride:                      cfg.HostnameOverride,
@@ -269,7 +270,7 @@ func (ConfigSource) Name() string {
 	return "gatherinfo"
 }
 
-func (cs ConfigSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error {
+func (cs ConfigSource) Apply(logger logr.Logger, cfg *apiconfig.Config) error {
 	cmdline, err := readCmdlineFile(cs.DriverCmdlinePath)
 	if err != nil || len(cmdline) == 0 {
 		// we inspect another process; need to tolerate missing or unreadable data

@@ -14,14 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driverconfig_test
+package driverconfig
 
 import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
 )
 
 func TestResolveNodeName(t *testing.T) {
@@ -39,7 +37,7 @@ func TestResolveNodeName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("NODE_NAME", tc.env)
-			got, err := driverconfig.ResolveNodeName(tc.override)
+			got, err := ResolveNodeName(tc.override)
 			if err != nil {
 				t.Fatalf("ResolveNodeName() error = %v", err)
 			}

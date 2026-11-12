@@ -20,6 +20,7 @@ import (
 	"flag"
 
 	"github.com/go-logr/logr"
+	"github.com/kubernetes-sigs/dra-driver-cpu/api/driverconfig"
 )
 
 // flagToJSONKey maps CLI flag names to their Config JSON keys.
@@ -42,8 +43,8 @@ type FlagSource struct {
 func FromFlags(flagset *flag.FlagSet) FlagSource {
 	fs := FlagSource{
 		flagset:        flagset,
-		bindAddress:    DefaultBindAddress,
-		kubeletRootDir: DefaultKubeletRootDir,
+		bindAddress:    driverconfig.DefaultBindAddress,
+		kubeletRootDir: driverconfig.DefaultKubeletRootDir,
 	}
 	flagset.StringVar(&fs.kubeConfig, "kubeconfig", fs.kubeConfig, "absolute path to the kubeconfig file")
 	flagset.StringVar(&fs.bindAddress, "bind-address", fs.bindAddress, "The address to bind the HTTP server for /healthz and /metrics endpoints")
@@ -56,7 +57,7 @@ func (fs FlagSource) Name() string {
 	return "flags"
 }
 
-func (fs FlagSource) Apply(logger logr.Logger, cfg *Config) error {
+func (fs FlagSource) Apply(logger logr.Logger, cfg *driverconfig.Config) error {
 	overrides := make(map[string]any)
 	fs.flagset.Visit(func(f *flag.Flag) {
 		key, ok := flagToJSONKey[f.Name]

@@ -16,7 +16,7 @@ limitations under the License.
 
 // The test file lives in package driverconfig_test (external test package) to
 // verify the exported API without access to internal helpers.
-package driverconfig_test
+package driverconfig
 
 import (
 	"errors"
@@ -29,17 +29,17 @@ import (
 
 	"github.com/go-logr/logr/funcr"
 	"github.com/go-logr/logr/testr"
-	"github.com/kubernetes-sigs/dra-driver-cpu/internal/driverconfig"
+	apiconfig "github.com/kubernetes-sigs/dra-driver-cpu/api/driverconfig"
 	"github.com/kubernetes-sigs/dra-driver-cpu/pkg/device"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // newFlagSet creates a FlagSet with cfg registered and args parsed.
-func newFlagSet(t *testing.T, args []string) (*flag.FlagSet, driverconfig.Source) {
+func newFlagSet(t *testing.T, args []string) (*flag.FlagSet, Source) {
 	t.Helper()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	src := driverconfig.FromFlags(fs)
+	src := FromFlags(fs)
 	require.NoError(t, fs.Parse(args))
 	return fs, src
 }
@@ -54,10 +54,10 @@ func writeFile(t *testing.T, dir, name, content string) string {
 
 // TestResolve_NoSources: no sources returns Default() unchanged.
 func TestResolve_NoSources(t *testing.T) {
-	result, err := driverconfig.Resolve(testr.New(t), nil)
+	result, err := Resolve(testr.New(t), nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, driverconfig.Default(), result)
+	assert.Equal(t, apiconfig.Default(), result)
 }
 
 // TestResolve_FileOverridesDefaults: file values are applied when no CLI flags are set.
@@ -72,8 +72,8 @@ sysfsOverlay: /custom/sysfs
 publishNodeAllocatableResourceMapping: true
 `)
 
-	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	result, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.NoError(t, err)
@@ -97,8 +97,8 @@ kubeconfig: /from/file
 		"--kubeconfig=/from/flag",
 	})
 
-	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	result, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 		src,
 	})
 
@@ -181,13 +181,13 @@ func TestResolve_RejectsAmbiguousKeys(t *testing.T) {
 			dir := t.TempDir()
 			cfgFile := writeFile(t, dir, "config.yaml", tc.file)
 
-			sources := []driverconfig.Source{driverconfig.FromFile(cfgFile)}
+			sources := []Source{FromFile(cfgFile)}
 			if len(tc.flags) > 0 {
 				_, src := newFlagSet(t, tc.flags)
 				sources = append(sources, src)
 			}
 
-			_, err := driverconfig.Resolve(testr.New(t), sources)
+			_, err := Resolve(testr.New(t), sources)
 
 			require.Error(t, err)
 			for _, want := range tc.wantContains {
@@ -218,8 +218,8 @@ groupby: socket
 cpudevicemode: individual
 `)
 
-	_, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	_, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.Error(t, err)
@@ -243,8 +243,8 @@ apiVersion: v1alpha1
 reservedCPUs: "4-7"
 `)
 
-	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	result, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.NoError(t, err)
@@ -261,8 +261,8 @@ func TestResolve_FileWithoutAPIVersion(t *testing.T) {
 reservedCPUs: "5-6"
 `)
 
-	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	result, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.NoError(t, err)
@@ -277,8 +277,8 @@ apiVersion: v99
 reservedCPUs: "0-3"
 `)
 
-	_, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	_, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.Error(t, err)
@@ -288,8 +288,8 @@ reservedCPUs: "0-3"
 
 // TestResolve_MissingFileIsError: a non-existent file path returns an error.
 func TestResolve_MissingFileIsError(t *testing.T) {
-	_, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile("/does/not/exist/config.yaml"),
+	_, err := Resolve(testr.New(t), []Source{
+		FromFile("/does/not/exist/config.yaml"),
 	})
 
 	require.Error(t, err)
@@ -314,7 +314,7 @@ kubeconfig: /from/file
 	// FlagSet but are not Config fields.
 	fs.String("config", "", "path to the config file")
 	fs.Int("v", 0, "log verbosity")
-	src := driverconfig.FromFlags(fs)
+	src := FromFlags(fs)
 	require.NoError(t, fs.Parse([]string{
 		"--config=" + cfgFile,
 		"--v=4",
@@ -326,8 +326,8 @@ kubeconfig: /from/file
 		logs.WriteString(prefix + " " + args + "\n")
 	}, funcr.Options{Verbosity: 10})
 
-	got, err := driverconfig.Resolve(logger, []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	got, err := Resolve(logger, []Source{
+		FromFile(cfgFile),
 		src,
 	})
 
@@ -353,7 +353,7 @@ func TestRemovedFlags_AreRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fs := flag.NewFlagSet("test", flag.ContinueOnError)
 			fs.SetOutput(io.Discard)
-			_ = driverconfig.FromFlags(fs)
+			_ = FromFlags(fs)
 
 			assert.Nil(t, fs.Lookup(name))
 			assert.Error(t, fs.Parse([]string{"--" + name + "=x"}))
@@ -363,24 +363,24 @@ func TestRemovedFlags_AreRejected(t *testing.T) {
 
 // TestResolve_EmptyFilePath: an empty file path is a no-op.
 func TestResolve_EmptyFilePath(t *testing.T) {
-	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(""),
+	result, err := Resolve(testr.New(t), []Source{
+		FromFile(""),
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, driverconfig.Default(), result)
+	assert.Equal(t, apiconfig.Default(), result)
 }
 
 // TestDefault pins the built-in default values.
 func TestDefault(t *testing.T) {
-	d := driverconfig.Default()
+	d := apiconfig.Default()
 
 	assert.Equal(t, ":8080", d.BindAddress)
 	assert.Equal(t, device.CPU_DEVICE_MODE_GROUPED, d.CPUDeviceMode)
 	assert.Equal(t, device.GROUP_BY_NUMA_NODE, d.GroupBy)
 	// The kubelet root defaults to the standard location, so behavior is
 	// unchanged unless the kubelet --root-dir is relocated.
-	assert.Equal(t, driverconfig.DefaultKubeletRootDir, d.KubeletRootDir)
+	assert.Equal(t, apiconfig.DefaultKubeletRootDir, d.KubeletRootDir)
 	// Fields with no built-in default must be zero/empty.
 	assert.Empty(t, d.Kubeconfig)
 	assert.Empty(t, d.HostnameOverride)
@@ -397,8 +397,8 @@ apiVersion: v1alpha1
 cpuDeviceMode: garbage
 `)
 
-	_, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	_, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.Error(t, err)
@@ -414,8 +414,8 @@ apiVersion: v1alpha1
 groupBy: garbage
 `)
 
-	_, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	_, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 	})
 
 	require.Error(t, err)
@@ -450,8 +450,8 @@ func TestResolve_ExcludedFieldInFileIsError(t *testing.T) {
 			dir := t.TempDir()
 			cfgFile := writeFile(t, dir, "config.yaml", "apiVersion: v1alpha1\n"+tc.content+"\n")
 
-			_, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-				driverconfig.FromFile(cfgFile),
+			_, err := Resolve(testr.New(t), []Source{
+				FromFile(cfgFile),
 			})
 
 			require.Error(t, err)
@@ -505,7 +505,7 @@ func TestResolve_KubeletRootDirFromFlag(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, src := newFlagSet(t, tc.args)
 
-			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
+			result, err := Resolve(testr.New(t), []Source{
 				src,
 			})
 
@@ -547,7 +547,7 @@ func TestFromFlags_BoolAndStringValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, src := newFlagSet(t, tc.args)
 
-			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{src})
+			result, err := Resolve(testr.New(t), []Source{src})
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPCIeRoots, result.ExposePCIeRoots)
@@ -600,8 +600,8 @@ func TestResolve_KubeletRootDirWithAConfigFile(t *testing.T) {
 
 			_, src := newFlagSet(t, tc.args)
 
-			result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-				driverconfig.FromFile(cfgFile),
+			result, err := Resolve(testr.New(t), []Source{
+				FromFile(cfgFile),
 				src,
 			})
 
@@ -631,12 +631,51 @@ reservedCPUs: "0-3"
 		"--expose-pcie-roots=true",
 	})
 
-	result, err := driverconfig.Resolve(testr.New(t), []driverconfig.Source{
-		driverconfig.FromFile(cfgFile),
+	result, err := Resolve(testr.New(t), []Source{
+		FromFile(cfgFile),
 		src,
 	})
 
 	require.NoError(t, err)
 	assert.True(t, result.ExposePCIeRoots)
 	assert.Equal(t, "0-3", result.ReservedCPUs)
+}
+
+func TestResolveValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   string
+		args     []string
+		wantRoot string
+		wantErr  string
+	}{
+		{name: "defaults", wantRoot: "/var/lib/kubelet"},
+		{name: "machine external", config: "groupBy: machine\nallocator: external\n", wantRoot: "/var/lib/kubelet"},
+		{name: "machine CPU manager", config: "groupBy: machine\n", wantErr: `invalid allocator "cpumanager" with groupBy "machine": must be "external"`},
+		{name: "invalid enum", config: "allocator: unknown\n", wantErr: `invalid allocator "unknown"`},
+		{name: "empty enum", config: "allocator: \"\"\n", wantErr: `invalid allocator ""`},
+		{name: "relocated root", args: []string{"--kubelet-root-dir=/mnt/a/../kubelet//"}, wantRoot: "/mnt/kubelet"},
+		{name: "empty root", args: []string{"--kubelet-root-dir="}, wantErr: "must not be empty"},
+		{name: "relative root", args: []string{"--kubelet-root-dir=relative/kubelet"}, wantErr: "must be an absolute path"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sources []Source
+			if tc.config != "" {
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(path, []byte(tc.config), 0600))
+				sources = append(sources, FromFile(path))
+			}
+			fs := flag.NewFlagSet("test", flag.ContinueOnError)
+			source := FromFlags(fs)
+			require.NoError(t, fs.Parse(tc.args))
+			sources = append(sources, source)
+			got, err := Resolve(testr.New(t), sources)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.wantRoot, got.KubeletRootDir)
+			}
+		})
+	}
 }
