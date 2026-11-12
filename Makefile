@@ -280,7 +280,7 @@ helm-docs-check: helm-docs ## verify helm chart README is up to date; fails if r
 		(echo "ERROR: Helm chart README.md is out of date. Run 'make helm-docs' to update it." && exit 1)
 
 .PHONY: driverconfig-schema
-driverconfig-schema: ## regenerate driverconfig.schema.json (build-time only; not checked in, see helm-schema) from the driverconfig.Config Go struct
+driverconfig-schema: ## regenerate driverconfig.schema.json (build-time only; not checked in, see helm-schema) from the public v1alpha1.Config Go struct
 	go run ./tools/gen-driverconfig-schema --out ${HELM_CHART}/driverconfig.schema.json
 
 .PHONY: helm-schema
